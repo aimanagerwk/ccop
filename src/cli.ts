@@ -19,6 +19,14 @@ import {
   type PendingTool,
   type WaitSnap,
 } from "./wait.js";
+import {
+  matchMonitorEvent,
+  matchMonitorPoll,
+  matchMonitorStart,
+  monitorOk,
+  parseMonitorStall,
+  parseMonitorTimeout,
+} from "./monitor.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -235,6 +243,7 @@ export async function main(argv?: string[]): Promise<void> {
   if (cmd === "plugins-reload") return rpc({ cmd: "plugins-reload", id: args.id }, 120);
   if (cmd === "skills-reload") return rpc({ cmd: "skills-reload", id: args.id }, 120);
   if (cmd === "wait") return cmdWaitCli(args);
+  if (cmd === "monitor") return cmdMonitorCli(args);
   out({ ok: false, error: `unknown cmd ${cmd}` }, 1);
 }
 
@@ -302,6 +311,51 @@ async function cmdWaitCli(args: Record<string, unknown>): Promise<void> {
   } catch (exc: any) {
     const msg = String(exc?.message || exc);
     if (/unknown cmd/i.test(msg)) return pollWait(args.id, parsed.kinds, timeoutSec);
+    out({ ok: false, error: `daemon not reachable: ${exc}` }, 1);
+  }
+}
+
+
+function emitLine(obj: Record<string, unknown>): void {
+  process.stdout.write(JSON.stringify(obj) + "\n");
+}
+
+async function pollMonitor(id: unknown, kinds: string[], timeoutSec: number, stallSec: number): Promise<void> {
+  const deadline = Date.now() + timeoutSec * 1000;
+  let fetched = await fetchWaitSnap(id);
+  if (!fetched.ok) out({ ok: false, error: fetched.error }, 1);
+  const start = matchMonitorStart(fetched.snap);
+  if (start.hit) out(monitorOk(fetched.id, start));
+  let afterTs = newestEventTs(fetched.snap.events);
+  let lastNewMs = Date.now();
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, WAIT_POLL_MS));
+    fetched = await fetchWaitSnap(id);
+    if (!fetched.ok) out({ ok: false, error: fetched.error }, 1);
+    const now = Date.now();
+    const { news, match } = matchMonitorPoll(fetched.snap, kinds, afterTs, lastNewMs, now, stallSec);
+    for (const e of news) {
+      emitLine(e);
+      const evHit = matchMonitorEvent(e, kinds, afterTs, fetched.snap.pending);
+      if (evHit.hit) out(monitorOk(fetched.id, evHit));
+    }
+    if (news.length) {
+      afterTs = newestEventTs(fetched.snap.events);
+      lastNewMs = now;
+    }
+    if (match.hit) out(monitorOk(fetched.id, match));
+  }
+  out({ ok: false, error: "monitor timeout" }, 1);
+}
+
+async function cmdMonitorCli(args: Record<string, unknown>): Promise<void> {
+  const parsed = parseWaitKinds(args.kind);
+  if (!parsed.ok) out({ ok: false, error: parsed.error }, 1);
+  const timeoutSec = parseMonitorTimeout(args.timeout);
+  const stallSec = parseMonitorStall(args.stall);
+  try {
+    await pollMonitor(args.id, parsed.kinds, timeoutSec, stallSec);
+  } catch (exc: any) {
     out({ ok: false, error: `daemon not reachable: ${exc}` }, 1);
   }
 }

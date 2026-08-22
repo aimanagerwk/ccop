@@ -70,6 +70,8 @@ upgrade 时带其一：
 | `plugins-reload` | `id` | |
 | `skills-reload` | `id` | |
 | `wait` | `id` | `kinds`（数组或逗号串；默认 needs_decision,needs_info,turn_done,failed,dead）、`timeout`（秒，默认 3600） |
+
+CLI `monitor` = `wait` + 实时事件流 + stall/PostToolUseFailure/pending；默认 kinds 含 `turn_done`。当前是本地 CLI poll，不是这条 WS dispatch 上的 cmd。
 | `shutdown` | | 能用，不是远程管理的正经路径。关 daemon。 |
 
 WS 另有（不进 unix `dispatch`）：

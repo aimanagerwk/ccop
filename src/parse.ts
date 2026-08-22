@@ -63,11 +63,12 @@ export function parseArgs(argv: string[]): { cmd: string; args: Record<string, u
       if (rest[i] === "--on") args.enabled = true;
       else if (rest[i] === "--off") args.enabled = false;
     }
-  } else if (cmd === "wait") {
+  } else if (cmd === "wait" || cmd === "monitor") {
     args.id = rest[0];
     for (let i = 1; i < rest.length; i++) {
       if (rest[i] === "--kind") args.kind = rest[++i];
       else if (rest[i] === "--timeout") args.timeout = parseInt(rest[++i], 10);
+      else if (rest[i] === "--stall") args.stall = parseInt(rest[++i], 10);
     }
   }
   return { cmd, args };

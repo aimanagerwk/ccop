@@ -91,6 +91,7 @@ sequenceDiagram
 - `status` — 列出全部会话：活/死、lock、pending、用量、skills。
 - `events ID [--tail N]` — 读这条会话的分类事件，可 tail。
 - `wait ID [--kind a,b] [--timeout SEC]` — 阻塞直到**之后**出现 wake kind（默认 `needs_decision,needs_info,turn_done,failed,dead`）。已死立刻 `{ok:true,woke:"dead"}`；已有 pending 且 kinds 含 `needs_decision` 立刻返回 pending。超时 `{ok:false,error:"wait timeout"}` 退出 1。当前 daemon 若无 wait RPC，CLI 每 ~400ms poll `events`/`status`。
+- `monitor ID [--kind a,b] [--timeout SEC] [--stall SEC]` — **wait + live event stream**：同样的未来事件规则，默认 kinds 与 wait 相同（含 `turn_done`，做完一轮会醒）。等待期间每条新事件一行 JSON；再打一行最终 `{ok:true,id,woke,reason,event?}` 后退出 0。额外 odd wake：`PostToolUseFailure`（summary/hook）、`--stall` 秒无新事件且仍活着（默认 180）、pending 工具。超时 `{ok:false,error:"monitor timeout"}` 退出 1。CLI poll，不重启 daemon。
 - `info ID` — 单会话快照：effort、workflow、用量、skills、plugins，便宜时带 mcp_servers。
 - `workflows ID` — 列出 session 广告过的 skills / slash / plugins。host 不 invoke。
 - `tasks ID` — 列出 SDK 任务。
@@ -181,6 +182,13 @@ cost_usd 是 SDK 估算（ResultMessage.total_cost_usd，流式 query() 取最�
     {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "woke": "needs_decision", "event": {"kind": "needs_decision"}, "pending": [{"tool_use_id": "toolu_...", "tool": "Write", "reason": "ask"}]}
     {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "woke": "dead", "event": {"kind": "dead", "summary": "session not live"}}
     {"ok": false, "error": "wait timeout"}
+
+例 monitor（先流新事件，最后一行才是 wake；`turn_done` 会停，不是只跟不醒）：
+
+    {"ts": 1770000000.2, "kind": "working", "summary": "tool Bash", "extra": {}}
+    {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "woke": "turn_done", "reason": "turn_done", "event": {"ts": 1770000001.0, "kind": "turn_done", "summary": "result message (turn, not task)", "extra": {}}}
+    {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "woke": "stall", "reason": "stall"}
+    {"ok": false, "error": "monitor timeout"}
 
 daemon 不可达：
 

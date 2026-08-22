@@ -80,3 +80,18 @@ describe("parseArgs wait", () => {
   });
 });
 
+
+describe("parseArgs monitor", () => {
+  it("monitor ID", () => {
+    expect(parseArgs(["monitor", "sess-1"])).toEqual({ cmd: "monitor", args: { id: "sess-1" } });
+  });
+
+  it("monitor ID --kind --timeout --stall", () => {
+    expect(
+      parseArgs(["monitor", "sess-1", "--kind", "turn_done,failed", "--timeout", "12", "--stall", "30"]),
+    ).toEqual({
+      cmd: "monitor",
+      args: { id: "sess-1", kind: "turn_done,failed", timeout: 12, stall: 30 },
+    });
+  });
+});
