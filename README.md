@@ -133,13 +133,13 @@ sequenceDiagram
 
 例 status（每行必有 cost_usd、token 合计、model_usage；历史会话可为 null）：
 
-    {"ok": true, "sessions": [{"id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "name": "smoke", "title": "Create hello.py", "cwd": "/workspace/hello-cc", "alive": true, "lock": null, "sdk_session_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "ultracode": true, "pending": [{"tool_use_id": "...", "tool": "Write", "reason": "ask"}], "last_turn": null, "last_task": null, "cost_usd": 0.12, "input_tokens": 150, "output_tokens": 28, "cache_read_input_tokens": 6, "cache_creation_input_tokens": 3, "model_usage": {"claude-opus": {"inputTokens": 100, "outputTokens": 20, "cacheReadInputTokens": 5, "cacheCreationInputTokens": 3, "costUSD": 0.1}}, "skills": ["pdf"], "slash_commands": ["/compact"], "plugins": []}]}
+    {"ok": true, "sessions": [{"id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "name": "smoke", "title": "Create hello.py", "cwd": "/workspace/hello-cc", "alive": true, "lock": null, "sdk_session_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "effort": "max", "enable_workflows": true, "pending": [{"tool_use_id": "...", "tool": "Write", "reason": "ask"}], "last_turn": null, "last_task": null, "cost_usd": 0.12, "input_tokens": 150, "output_tokens": 28, "cache_read_input_tokens": 6, "cache_creation_input_tokens": 3, "model_usage": {"claude-opus": {"inputTokens": 100, "outputTokens": 20, "cacheReadInputTokens": 5, "cacheCreationInputTokens": 3, "costUSD": 0.1}}, "skills": ["pdf"], "slash_commands": ["/compact"], "plugins": []}]}
 
 cost_usd 是 SDK 估算（ResultMessage.total_cost_usd，流式 query() 取最新一条，不要相加），不是 otomianai 账单。自定义 gateway 可能是 $0 或 Anthropic 标价。token 合计来自 modelUsage（主循环 + Task 子代理 + sidechain + compaction + Workflow），不是单轮 usage。
 
 例 info / workflows：
 
-    {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "ultracode": true, "skills": ["pdf"], "slash_commands": ["/compact"], "plugins": [], "usage": {"cost_usd": 0.12, "model_usage": {}, "last_turn_usage": {}, "updated_ts": 1770000000.1}, "cost_usd": 0.12, "input_tokens": 150, "output_tokens": 28, "cache_read_input_tokens": 6, "cache_creation_input_tokens": 3, "model_usage": {}}
+    {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "effort": "max", "enable_workflows": true, "skills": ["pdf"], "slash_commands": ["/compact"], "plugins": [], "usage": {"cost_usd": 0.12, "model_usage": {}, "last_turn_usage": {}, "updated_ts": 1770000000.1}, "cost_usd": 0.12, "input_tokens": 150, "output_tokens": 28, "cache_read_input_tokens": 6, "cache_creation_input_tokens": 3, "model_usage": {}}
     {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "skills": ["pdf"], "slash_commands": ["/compact"], "plugins": [], "note": "listed from session advertise (init); host does not invoke workflows — the model does"}
 
 没有单独的 invoke-workflow RPC。settingSources 已是 user+project+local，磁盘上的 Claude Code dynamic workflows 由模型自己触发；host 只列出 session 广告过的 skills / slash_commands / plugins。
@@ -186,13 +186,13 @@ daemon 不可达：
 
 落盘路径不变：/workspace/ccop/data/ 。sessions.json 按 Claude session UUID 索引；事件文件是 data/events/<id>.jsonl。
 
-## 7. 默认 ultracode
+## 7. 默认 max + dynamic workflow（硬编码）
 
-每条 session 的 query options 默认：
+每条 session 的 query options **写死**，不跟设置开关：
 
-    ultracode: true
     enableWorkflows: true
-    effort: "xhigh"
+    effort: "max"
+    ultracode: false
 
-`ultracode` 是布尔 session flag（xhigh effort + 站立动态 workflow 编排），不是 EffortLevel。不要传 effort: "ultracode"。需要 enableWorkflows 和能跑 xhigh 的模型。用户 ~/.claude/settings.json 里的 ultracode / enableWorkflows / effortLevel 保持不动；host 仍在 start 时显式传入。
+不要用 ultracode 布尔（那会锁 xhigh）。dynamic workflow 永远开。`max` 不能写进 settings.json 的 effortLevel（那边最高 xhigh），所以必须由 host 传入。
 

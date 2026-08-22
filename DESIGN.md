@@ -244,4 +244,4 @@ session init 广告的 `skills` / `slash_commands` / `plugins` 落盘；`workflo
 
 从 `task_notification` / `task_started` / `task_progress` / `background_tasks_changed` 和 SubagentStart/Stop hook 跟踪任务。CLI：`tasks` / `task-stop` / `task-bg` / `subagents`。`stopTask` / `backgroundTasks` 走活 Query；Python 形客户端没有这些方法时返回明确错误。`listSubagents` 优先 SDK，否则用跟踪列表。
 
-每条 session 默认 `ultracode: true` + `enableWorkflows: true` + `effort: "xhigh"`。
+每条 session **硬编码** `effort: "max"` + `enableWorkflows: true`（`ultracode: false`）。dynamic workflow 一直开，不做成可关选项。

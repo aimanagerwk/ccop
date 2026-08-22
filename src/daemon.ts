@@ -204,7 +204,10 @@ class Session {
   pending: Record<string, Pending> = {};
   alive = false;
   policy = policyMod.loadPolicy();
-  ultracode = true;
+  /** Hardcoded: always max effort. */
+  effort = "max" as const;
+  /** Hardcoded: dynamic workflows always on. */
+  enableWorkflows = true;
   usage: SessionUsage | null = null;
   skills: string[] = [];
   slash_commands: string[] = [];
@@ -253,7 +256,8 @@ class Session {
         reason: v.reason,
         input: v.input || {},
       })),
-      ultracode: this.ultracode,
+      effort: this.effort,
+      enable_workflows: this.enableWorkflows,
       usage: this.usage,
       skills: this.skills,
       slash_commands: this.slash_commands,
@@ -568,9 +572,9 @@ class Host {
       canUseTool,
       permissionMode: "default",
       settingSources: ["user", "project", "local"],
-      ultracode: true,
+      ultracode: false,
       enableWorkflows: true,
-      effort: "xhigh",
+      effort: "max",
       hooks,
     };
     if (resumeId) common.resume = resumeId;
@@ -713,7 +717,8 @@ class Host {
           tool: v.tool,
           reason: v.reason,
         }));
-        rec.ultracode = live.ultracode;
+        rec.effort = live.effort;
+        rec.enable_workflows = live.enableWorkflows;
         rec.skills = live.skills;
         rec.slash_commands = live.slash_commands;
         rec.plugins = live.plugins;
@@ -724,7 +729,8 @@ class Host {
       if (!("last_turn" in rec)) rec.last_turn = null;
       if (!("last_task" in rec)) rec.last_task = null;
       if (!("pending" in rec)) rec.pending = [];
-      if (!("ultracode" in rec)) rec.ultracode = true;
+      if (!("effort" in rec)) rec.effort = "max";
+      if (!("enable_workflows" in rec)) rec.enable_workflows = true;
       if (!("skills" in rec)) rec.skills = live?.skills ?? [];
       if (!("slash_commands" in rec)) rec.slash_commands = live?.slash_commands ?? [];
       if (!("plugins" in rec)) rec.plugins = live?.plugins ?? [];
@@ -753,7 +759,8 @@ class Host {
       rec.slash_commands = live.slash_commands;
       rec.plugins = live.plugins;
       rec.usage = live.usage;
-      rec.ultracode = live.ultracode;
+      rec.effort = live.effort;
+      rec.enable_workflows = live.enableWorkflows;
       rec.tasks = Object.values(live.tasks);
       rec.subagents = live.subagents;
       rec.cwd = live.cwd;
@@ -769,7 +776,8 @@ class Host {
     return {
       ok: true,
       id: resolved.id,
-      ultracode: rec.ultracode ?? true,
+      effort: rec.effort ?? "max",
+      enable_workflows: rec.enable_workflows ?? true,
       skills: rec.skills ?? [],
       slash_commands: rec.slash_commands ?? [],
       plugins: rec.plugins ?? [],
