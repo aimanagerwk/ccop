@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+data/ccop.sock
+data/daemon.pid
+data/daemon.log
+data/sessions.json
+data/events/
+*.secret
