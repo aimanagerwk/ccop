@@ -4,8 +4,8 @@ import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 import next from "next";
-import { getBridge } from "./src/lib/bridge-singleton.js";
-import { attachWsProxy } from "./src/lib/ws-proxy.js";
+import { getHub } from "./src/lib/bridge-singleton.js";
+import { attachWsHub } from "./src/lib/attach-hub.js";
 
 const dir = dirname(fileURLToPath(import.meta.url));
 const dev = process.env.NODE_ENV !== "production";
@@ -20,7 +20,7 @@ await app.prepare();
 const server = createServer((req, res) => {
   void handle(req, res);
 });
-attachWsProxy(server, getBridge());
+attachWsHub(server, getHub());
 
 server.listen(port, host, () => {
   console.log(`ccop web http://${host}:${port}`);

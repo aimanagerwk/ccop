@@ -1,14 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ConnectForm } from "../components/ConnectForm";
 import { Composer } from "../components/Composer";
+import { PathTree, type TreeSel } from "../components/PathTree";
 import { PendingBar } from "../components/PendingBar";
-import { SessionList } from "../components/SessionList";
-import { StartForm } from "../components/StartForm";
 import { Toasts, type ToastItem } from "../components/Toasts";
 import { Transcript } from "../components/Transcript";
-import { rpc } from "../lib/client";
+import { fetchHealth, postJson, rpc } from "../lib/client";
+import {
+  emptyDepot,
+  loadDepot,
+  pinCwd,
+  saveDepot,
+  serverKey,
+  type DepotServer,
+  type DepotState,
+} from "../lib/depot-store";
 import type { ClassifiedEvent, SessionRow } from "../lib/protocol";
 import { toastPriority } from "../lib/protocol";
 
@@ -23,70 +30,113 @@ function asEvents(raw: unknown): ClassifiedEvent[] {
 }
 
 export default function Page() {
-  const [connected, setConnected] = useState(false);
-  const [target, setTarget] = useState<{ host: string; port: number } | null>(null);
-  const [sessions, setSessions] = useState<SessionRow[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [depot, setDepot] = useState<DepotState>(emptyDepot);
+  const [live, setLive] = useState<Record<string, boolean>>({});
+  const [sessionsByServer, setSessionsByServer] = useState<Record<string, SessionRow[]>>({});
+  const [sel, setSel] = useState<TreeSel>({ serverId: null, cwd: null, sessionId: null });
   const [events, setEvents] = useState<ClassifiedEvent[]>([]);
   const [badges, setBadges] = useState<Record<string, number>>({});
   const [toasts, setToasts] = useState<ToastItem[]>([]);
-  const selectedRef = useRef<string | null>(null);
+  const selRef = useRef(sel);
   const toastN = useRef(0);
-  selectedRef.current = selected;
+  selRef.current = sel;
 
-  const refreshStatus = useCallback(async () => {
-    const res = await rpc("status");
-    if (!res.ok) return;
-    setSessions(asSessions(res.sessions));
+  const persist = useCallback((next: DepotState) => {
+    setDepot(next);
+    saveDepot(next);
   }, []);
 
-  const loadEvents = useCallback(async (id: string) => {
-    const res = await rpc("events", { id, tail: 200 });
+  const refreshOne = useCallback(async (serverId: string) => {
+    const res = await rpc("status", {}, serverId);
+    if (!res.ok) return;
+    setSessionsByServer((m) => ({ ...m, [serverId]: asSessions(res.sessions) }));
+  }, []);
+
+  const refreshAll = useCallback(async () => {
+    const h = await fetchHealth();
+    const liveMap: Record<string, boolean> = {};
+    for (const s of h.servers) liveMap[s.id] = s.connected;
+    setLive(liveMap);
+    await Promise.all(h.servers.filter((s) => s.connected).map((s) => refreshOne(s.id)));
+  }, [refreshOne]);
+
+  const loadEvents = useCallback(async (serverId: string, id: string) => {
+    const res = await rpc("events", { id, tail: 200 }, serverId);
     if (!res.ok) return;
     setEvents(asEvents(res.events));
   }, []);
 
-  const onSelect = useCallback(
-    (id: string) => {
-      setSelected(id);
+  const onSelectSession = useCallback(
+    (serverId: string, cwd: string | undefined, id: string) => {
+      setSel({ serverId, cwd: cwd || null, sessionId: id });
       setBadges((b) => {
         const next = { ...b };
         delete next[id];
         return next;
       });
-      void loadEvents(id);
+      void loadEvents(serverId, id);
     },
     [loadEvents],
   );
 
-  const onConnected = useCallback(async () => {
-    const h = await fetch("/api/health").then((r) => r.json());
-    setConnected(Boolean(h.connected));
-    setTarget(h.target ?? null);
-    await refreshStatus();
-  }, [refreshStatus]);
-
-  useEffect(() => {
-    void fetch("/api/health")
-      .then((r) => r.json())
-      .then((h) => {
-        setConnected(Boolean(h.connected));
-        setTarget(h.target ?? null);
-        if (h.connected) void refreshStatus();
+  const connectServer = useCallback(
+    async (s: DepotServer) => {
+      const res = await postJson("/api/connect", {
+        id: s.id,
+        host: s.host,
+        port: s.port,
+        token: s.token,
       });
-  }, [refreshStatus]);
+      if (!res.ok) return String(res.error || "接通失败");
+      setLive((m) => ({ ...m, [s.id]: true }));
+      await refreshOne(s.id);
+      return "";
+    },
+    [refreshOne],
+  );
 
   useEffect(() => {
-    if (!connected) return;
-    const t = setInterval(() => void refreshStatus(), 3000);
+    const stored = loadDepot();
+    setDepot(stored);
+    void (async () => {
+      const h = await fetchHealth();
+      const liveMap: Record<string, boolean> = {};
+      for (const s of h.servers) liveMap[s.id] = s.connected;
+      setLive(liveMap);
+      let next = stored;
+      if (h.target && !next.servers.some((s) => s.host === h.target!.host && s.port === h.target!.port)) {
+        const id = h.activeId || serverKey(h.target.host, h.target.port);
+        next = {
+          ...next,
+          servers: [
+            ...next.servers,
+            { id, label: "本机", host: h.target.host, port: h.target.port, token: "" },
+          ],
+        };
+        persist(next);
+      }
+      if (h.connected) {
+        await Promise.all(h.servers.filter((s) => s.connected).map((s) => refreshOne(s.id)));
+      }
+      for (const s of next.servers) {
+        if (s.token && !liveMap[s.id]) void connectServer(s);
+      }
+    })();
+  }, [connectServer, persist, refreshOne]);
+
+  const anyLive = Object.values(live).some(Boolean);
+
+  useEffect(() => {
+    if (!anyLive) return;
+    const t = setInterval(() => void refreshAll(), 3000);
     return () => clearInterval(t);
-  }, [connected, refreshStatus]);
+  }, [anyLive, refreshAll]);
 
   useEffect(() => {
-    if (!connected) return;
+    if (!anyLive) return;
     const es = new EventSource("/api/events");
     es.onmessage = (ev) => {
-      let msg: { type?: string; id?: string; event?: ClassifiedEvent };
+      let msg: { type?: string; id?: string; serverId?: string; event?: ClassifiedEvent };
       try {
         msg = JSON.parse(ev.data);
       } catch {
@@ -101,40 +151,104 @@ export default function Page() {
         const key = `t${toastN.current}`;
         setToasts((xs) => [...xs, { key, id: msg.id!, kind, summary: String(rec.summary || "") }]);
       }
-      if (selectedRef.current !== msg.id && (pri === "interrupt" || pri === "badge")) {
+      const same =
+        selRef.current.sessionId === msg.id &&
+        (!msg.serverId || selRef.current.serverId === msg.serverId);
+      if (!same && (pri === "interrupt" || pri === "badge")) {
         setBadges((b) => ({ ...b, [msg.id!]: (b[msg.id!] || 0) + 1 }));
       }
-      if (selectedRef.current === msg.id) {
+      if (same) {
         setEvents((xs) => [...xs, rec as ClassifiedEvent]);
       }
-      void refreshStatus();
+      void refreshAll();
     };
     return () => es.close();
-  }, [connected, refreshStatus]);
+  }, [anyLive, refreshAll]);
 
-  const current = sessions.find((s) => s.id === selected) || null;
+  const current =
+    (sel.serverId && (sessionsByServer[sel.serverId] || []).find((s) => s.id === sel.sessionId)) || null;
+  const connected = Boolean(sel.serverId && live[sel.serverId]);
 
   return (
-    <div className="app">
-      <div className="top">
-        <ConnectForm connected={connected} target={target} onConnected={() => void onConnected()} />
-      </div>
-      <div className="side">
-        <SessionList sessions={sessions} selected={selected} badges={badges} onSelect={onSelect} />
-        <StartForm
-          enabled={connected}
-          onStarted={(id) => {
-            void refreshStatus();
-            onSelect(id);
-          }}
-        />
-      </div>
+    <div className={`app${depot.collapsed ? " collapsed" : ""}`}>
+      <PathTree
+        depot={depot}
+        sessionsByServer={sessionsByServer}
+        live={live}
+        selected={sel}
+        badges={badges}
+        collapsed={depot.collapsed}
+        onToggleCollapsed={() => persist({ ...depot, collapsed: !depot.collapsed })}
+        onSelectServer={(id) => {
+          setSel({ serverId: id, cwd: null, sessionId: null });
+          setEvents([]);
+          const s = depot.servers.find((x) => x.id === id);
+          if (s && s.token && !live[id]) void connectServer(s);
+          else void refreshOne(id);
+        }}
+        onSelectCwd={(serverId, cwd) => {
+          setSel({ serverId, cwd, sessionId: null });
+          setEvents([]);
+        }}
+        onSelectSession={onSelectSession}
+        onSaveServer={(s) => {
+          const servers = depot.servers.some((x) => x.id === s.id)
+            ? depot.servers.map((x) => (x.id === s.id ? s : x))
+            : [...depot.servers, s];
+          persist({ ...depot, servers });
+          setSel({ serverId: s.id, cwd: null, sessionId: null });
+          void connectServer(s);
+        }}
+        onDropServer={(id) => {
+          persist({ ...depot, servers: depot.servers.filter((s) => s.id !== id) });
+          if (sel.serverId === id) {
+            setSel({ serverId: null, cwd: null, sessionId: null });
+            setEvents([]);
+          }
+        }}
+        onPinCwd={(serverId, cwd) => persist(pinCwd(depot, serverId, cwd))}
+        onStart={async (serverId, cwd, prompt, name) => {
+          const res = await rpc(
+            "start",
+            { cwd, prompt, name: name || undefined, permission_mode: "auto" },
+            serverId,
+          );
+          if (!res.ok) throw new Error(String(res.error || "开会话失败"));
+          await refreshOne(serverId);
+          onSelectSession(serverId, cwd, String(res.id));
+        }}
+        onStop={async (serverId, id) => {
+          await rpc("stop", { id }, serverId);
+          await refreshOne(serverId);
+          if (sel.sessionId === id) {
+            setSel({ serverId, cwd: sel.cwd, sessionId: null });
+            setEvents([]);
+          }
+        }}
+      />
       <div className="main">
         {current ? (
-          <PendingBar id={current.id} pending={current.pending || []} onDone={() => void refreshStatus()} />
-        ) : null}
-        <Transcript events={events} />
-        <Composer id={selected} held={current?.lock === "operator"} enabled={connected && Boolean(current?.alive)} />
+          <>
+            <div className="pathcrumb">
+              {sel.serverId} · {current.cwd || sel.cwd || "—"} · {current.id}
+            </div>
+            <PendingBar
+              id={current.id}
+              serverId={sel.serverId}
+              pending={current.pending || []}
+              onDone={() => void refreshAll()}
+            />
+          </>
+        ) : (
+          <div className="pathcrumb">选一台机、一个目录、一路会话</div>
+        )}
+        {current ? <Transcript events={events} /> : <div className="desk-empty">调度台空着</div>}
+        <Composer
+          id={sel.sessionId}
+          serverId={sel.serverId}
+          held={current?.lock === "operator"}
+          enabled={connected && Boolean(current?.alive)}
+        />
       </div>
       <Toasts items={toasts} onDismiss={(k) => setToasts((xs) => xs.filter((t) => t.key !== k))} />
     </div>

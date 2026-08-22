@@ -1,10 +1,10 @@
-import { getBridge } from "../../../lib/bridge-singleton";
+import { getHub } from "../../../lib/bridge-singleton";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(): Promise<Response> {
-  const bridge = getBridge();
-  if (!bridge.isConnected()) {
+  const hub = getHub();
+  if (!hub.anyConnected()) {
     return new Response(JSON.stringify({ ok: false, error: "not connected" }), {
       status: 503,
       headers: { "content-type": "application/json" },
@@ -15,7 +15,7 @@ export async function GET(): Promise<Response> {
   let heartbeat: ReturnType<typeof setInterval> | null = null;
   const stream = new ReadableStream({
     start(controller) {
-      off = bridge.watch((evt) => {
+      off = hub.watchAll((evt) => {
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(evt)}\n\n`));
         } catch {
