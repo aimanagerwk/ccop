@@ -45,7 +45,7 @@ async function mainSmoke(): Promise<number> {
   console.log("== up again (idempotent)");
   console.log(await rpc(["up"]));
   console.log("== start smoke");
-  const st = await rpc(["start", "smoke", "--cwd", "/workspace/hello-cc", "--prompt", PROMPT]);
+  const st = await rpc(["start", "--cwd", "/workspace/hello-cc", "--prompt", PROMPT, "--name", "smoke"]);
   const shown: Record<string, unknown> = {};
   for (const k of Object.keys(st)) if (k !== "trace") shown[k] = st[k];
   console.log(shown);
@@ -63,17 +63,18 @@ async function mainSmoke(): Promise<number> {
     }
     return 1;
   }
+  const id = String(st.id);
   console.log("== hold");
-  console.log(await rpc(["hold", "smoke"]));
+  console.log(await rpc(["hold", id]));
   console.log("== send while held (expect error)");
-  const held = await rpc(["send", "smoke", "ignore this"]);
+  const held = await rpc(["send", id, "ignore this"]);
   console.log(held);
   if (held.ok || held.error !== "held") {
     console.log("FAIL: expected held error");
     return 1;
   }
   console.log("== release");
-  console.log(await rpc(["release", "smoke"]));
+  console.log(await rpc(["release", id]));
 
   const deadline = Date.now() + 240000;
   const approved = new Set<string>();
@@ -81,19 +82,19 @@ async function mainSmoke(): Promise<number> {
   while (Date.now() < deadline) {
     const status = await rpc(["status"]);
     const sessions = Object.fromEntries(
-      ((status.sessions as Record<string, unknown>[]) || []).map((s) => [s.name, s]),
+      ((status.sessions as Record<string, unknown>[]) || []).map((s) => [s.id, s]),
     );
-    const s = (sessions.smoke || {}) as Record<string, unknown>;
+    const s = (sessions[id] || {}) as Record<string, unknown>;
     const pending = (s.pending as { tool_use_id?: string; tool?: string; reason?: string }[]) || [];
     for (const p of pending) {
       const tid = p.tool_use_id;
       if (tid && !approved.has(tid)) {
         console.log("approve", tid, p.tool, p.reason);
-        console.log(await rpc(["approve", "smoke", tid]));
+        console.log(await rpc(["approve", id, tid]));
         approved.add(tid);
       }
     }
-    const ks = kinds("smoke");
+    const ks = kinds(id);
     if (existsSync(HELLO)) {
       const text = readFileSync(HELLO, "utf8");
       if (text.includes("Hello")) helloOk = true;
@@ -104,15 +105,15 @@ async function mainSmoke(): Promise<number> {
     }
     if (ks.has("dead") && !helloOk) {
       console.log("session dead early", [...ks].sort());
-      console.log("last events", readEvents("smoke").slice(-8));
+      console.log("last events", readEvents(id).slice(-8));
       return 1;
     }
     await new Promise((r) => setTimeout(r, 1000));
   }
   if (Date.now() >= deadline) {
-    console.log("TIMEOUT kinds", [...kinds("smoke")].sort());
+    console.log("TIMEOUT kinds", [...kinds(id)].sort());
     console.log("status", await rpc(["status"]));
-    console.log("events tail", readEvents("smoke").slice(-15));
+    console.log("events tail", readEvents(id).slice(-15));
     return 1;
   }
   console.log("== hello.py");
@@ -120,10 +121,10 @@ async function mainSmoke(): Promise<number> {
   console.log("== status");
   const status = await rpc(["status"]);
   console.log(JSON.stringify(status, null, 2).slice(0, 4000));
-  const smoke = ((status.sessions as Record<string, unknown>[]) || []).find((x) => x.name === "smoke")!;
+  const smoke = ((status.sessions as Record<string, unknown>[]) || []).find((x) => x.id === id)!;
   if (!("last_turn" in smoke) || !("last_task" in smoke)) throw new Error("missing last_turn/last_task");
   console.log("== stop");
-  console.log(await rpc(["stop", "smoke"]));
+  console.log(await rpc(["stop", id]));
   console.log("== down");
   console.log(await rpc(["down"]));
   console.log("SMOKE_OK");

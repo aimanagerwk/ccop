@@ -5,7 +5,15 @@ import { createServer, type Socket } from "node:net";
 import * as classify from "./classify.js";
 import { CLI_PATH, LOG_PATH, PERMISSION_TIMEOUT_S, PID_PATH, SOCK_PATH, ensureData } from "./paths.js";
 import * as policyMod from "./policy.js";
-import { appendEvent, listSessions, readEvents, upsertSession } from "./store.js";
+import { randomUUID } from "node:crypto";
+import {
+  appendEvent,
+  listSessions,
+  readEvents,
+  resolveSessionId,
+  upsertSession,
+  type SessionRef,
+} from "./store.js";
 
 export const HOOK_EVENTS = [
   "PreToolUse",
@@ -140,27 +148,38 @@ async function openLiveClient(options: Record<string, unknown>, firstPrompt: str
 }
 
 class Session {
+  /** Claude session UUID — the only lookup key. */
+  id: string;
+  /** Optional operator label (--name). Display only. */
   name: string;
+  /** Claude title (customTitle / summary). */
+  title: string | null = null;
   cwd: string;
   client: LiveClient | null = null;
   recvTask: Promise<void> | null = null;
   recvAbort: AbortController | null = null;
   lock: string | null = null;
-  sdkSessionId: string | null = null;
   pending: Record<string, Pending> = {};
   alive = false;
   policy = policyMod.loadPolicy();
 
-  constructor(name: string, cwd: string) {
-    this.name = name;
+  constructor(id: string, cwd: string, name = "") {
+    this.id = id;
     this.cwd = cwd;
+    this.name = name;
+  }
+
+  get sdkSessionId(): string {
+    return this.id;
   }
 
   persist(): void {
-    upsertSession(this.name, {
+    upsertSession(this.id, {
+      name: this.name,
+      title: this.title,
       cwd: this.cwd,
       lock: this.lock,
-      sdk_session_id: this.sdkSessionId,
+      sdk_session_id: this.id,
       alive: this.alive,
       pending: Object.entries(this.pending).map(([k, v]) => ({
         tool_use_id: k,
@@ -172,7 +191,7 @@ class Session {
   }
 
   emit(events: classify.Event[]): void {
-    for (const e of events) appendEvent(this.name, e.kind, e.summary, e.extra || {});
+    for (const e of events) appendEvent(this.id, e.kind, e.summary, e.extra || {}, this.name);
   }
 
   async canUseTool(toolName: string, toolInput: Record<string, unknown>, ctx: any): Promise<unknown> {
@@ -236,24 +255,14 @@ class Session {
     const evName = String(payload.hook_event_name || payload.hook_event || payload.hookEventName || "");
     if (toolUseId && !("tool_use_id" in payload)) payload.tool_use_id = toolUseId;
     this.emit(classify.fromHook(evName, payload));
-    const sid = payload.session_id || payload.sessionId;
-    if (sid && !this.sdkSessionId) {
-      this.sdkSessionId = String(sid);
-      this.persist();
-    }
+    void payload.session_id;
+    void payload.sessionId;
     return {};
   }
 
   ingestSessionId(msg: any): void {
-    const val = msg?.session_id || msg?.sessionId;
-    if (val) {
-      this.sdkSessionId = String(val);
-      return;
-    }
-    const data = msg?.data;
-    if (data && typeof data === "object" && data.session_id) {
-      this.sdkSessionId = String(data.session_id);
-    }
+    /* id is the Claude session UUID we passed as options.sessionId / resume */
+    void msg;
   }
 
   async receiveLoop(): Promise<void> {
@@ -264,10 +273,7 @@ class Session {
         const m = msg as any;
         const typeName = m?.constructor?.name || "";
         if (m?.type === "result" || typeName === "ResultMessage") {
-          if (m.session_id || m.sessionId) {
-            this.sdkSessionId = String(m.session_id || m.sessionId);
-            this.persist();
-          }
+          if (m.session_id || m.sessionId) this.persist();
           this.emit(
             classify.fromResult({
               is_error: Boolean(m.is_error ?? m.isError),
@@ -367,15 +373,16 @@ class Host {
   }
 
   async cmdStart(req: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const name = req.name as string | undefined;
+    const name = typeof req.name === "string" ? req.name : "";
     const cwd = req.cwd as string | undefined;
     const prompt = req.prompt as string | undefined;
     const resumeId = (req.resume_id as string | undefined) || undefined;
-    if (!name || !cwd || prompt === undefined) return { ok: false, error: "start requires name, cwd, prompt" };
-    if (this.sessions[name]?.alive) return { ok: false, error: `session ${name} already live` };
-    if (this.sessions[name]) await this.teardown(name);
-    const sess = new Session(name, cwd);
-    this.sessions[name] = sess;
+    if (!cwd || prompt === undefined) return { ok: false, error: "start requires cwd, prompt" };
+    const id = resumeId || randomUUID();
+    if (this.sessions[id]?.alive) return { ok: false, error: `session ${id} already live` };
+    if (this.sessions[id]) await this.teardown(id);
+    const sess = new Session(id, cwd, name);
+    this.sessions[id] = sess;
 
     const hookCb = async (hookInput: unknown, toolUseId: string | null) => sess.onHook(hookInput, toolUseId);
     const matcher = { hooks: [hookCb], timeout: 30 };
@@ -397,6 +404,8 @@ class Host {
       hooks,
     };
     if (resumeId) common.resume = resumeId;
+    else common.sessionId = id;
+    if (name) common.title = name;
 
     let options: Record<string, unknown> = {
       ...common,
@@ -418,12 +427,17 @@ class Host {
     }
 
     sess.alive = true;
-    try {
-      const info = await sess.client.getServerInfo();
-      const sid = sessionIdFromInfo(info);
-      if (sid) sess.sdkSessionId = sid;
-    } catch {
-      /* ignore */
+    await refreshClaudeTitle(sess);
+    if (resumeId && name) {
+      try {
+        const sdk = await import("@anthropic-ai/claude-agent-sdk");
+        if (typeof sdk.renameSession === "function") {
+          await sdk.renameSession(id, name, { dir: cwd });
+          sess.title = name;
+        }
+      } catch {
+        /* display-only; ignore */
+      }
     }
     sess.persist();
     sess.emit(classify.fromSent({ text: prompt }));
@@ -433,11 +447,11 @@ class Host {
         /* already logged in loop */
       }
     });
-    return { ok: true, name, sdk_session_id: sess.sdkSessionId };
+    return { ok: true, id, name: sess.name, title: sess.title, sdk_session_id: sess.id };
   }
 
   async cmdSend(req: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const sess = this.need(req.name as string | undefined);
+    const sess = this.need(req);
     if (!(sess instanceof Session)) return sess;
     if (sess.lock === "operator") return { ok: false, error: "held" };
     if (!sess.client || !sess.alive) return { ok: false, error: "session not live" };
@@ -446,34 +460,34 @@ class Host {
     await sess.client.query(String(text));
     sess.emit(classify.fromSent({ text: String(text) }));
     sess.emit([{ kind: "working", summary: "query sent", extra: {} }]);
-    return { ok: true, name: sess.name };
+    return { ok: true, id: sess.id, name: sess.name };
   }
 
   async cmdInterrupt(req: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const sess = this.need(req.name as string | undefined);
+    const sess = this.need(req);
     if (!(sess instanceof Session)) return sess;
     if (!sess.client) return { ok: false, error: "no client" };
     await sess.client.interrupt();
     sess.emit(classify.fromInterrupted());
-    return { ok: true, name: sess.name };
+    return { ok: true, id: sess.id, name: sess.name };
   }
 
   async cmdHold(req: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const sess = this.need(req.name as string | undefined);
+    const sess = this.need(req);
     if (!(sess instanceof Session)) return sess;
     sess.lock = "operator";
     sess.persist();
     sess.emit(classify.fromHeld());
-    return { ok: true, name: sess.name, lock: "operator" };
+    return { ok: true, id: sess.id, name: sess.name, lock: "operator" };
   }
 
   async cmdRelease(req: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const sess = this.need(req.name as string | undefined);
+    const sess = this.need(req);
     if (!(sess instanceof Session)) return sess;
     sess.lock = null;
     sess.persist();
-    upsertSession(sess.name, { state: "idle" });
-    return { ok: true, name: sess.name, lock: null };
+    upsertSession(sess.id, { state: "idle" });
+    return { ok: true, id: sess.id, name: sess.name, lock: null };
   }
 
   async cmdApprove(req: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -485,7 +499,7 @@ class Host {
   }
 
   async resolvePerm(req: Record<string, unknown>, allow: boolean): Promise<Record<string, unknown>> {
-    const sess = this.need(req.name as string | undefined);
+    const sess = this.need(req);
     if (!(sess instanceof Session)) return sess;
     const tid = req.tool_use_id as string | undefined;
     if (!tid) return { ok: false, error: "tool_use_id required" };
@@ -494,37 +508,45 @@ class Host {
     if (item.done) return { ok: false, error: "already resolved" };
     if (allow) item.resolve(PermissionResultAllow());
     else item.resolve(PermissionResultDeny("operator deny"));
-    return { ok: true, name: sess.name, tool_use_id: tid, allowed: allow };
+    return { ok: true, id: sess.id, name: sess.name, tool_use_id: tid, allowed: allow };
   }
 
   async cmdStop(req: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const name = req.name as string | undefined;
-    if (!name) return { ok: false, error: "name required" };
-    if (!(name in this.sessions)) return { ok: false, error: `unknown session ${name}` };
-    await this.teardown(name);
-    upsertSession(name, { alive: false, state: "dead" });
-    appendEvent(name, "dead", "stopped", {});
-    return { ok: true, name };
+    const resolved = resolveSessionId(lookupKey(req), this.sessionRefs());
+    if (!resolved.ok) return resolved;
+    const id = resolved.id;
+    const label = this.sessions[id]?.name ?? "";
+    if (id in this.sessions) await this.teardown(id);
+    upsertSession(id, { alive: false, state: "dead" });
+    appendEvent(id, "dead", "stopped", {}, label);
+    return { ok: true, id };
   }
 
   async cmdStatus(_req: Record<string, unknown>): Promise<Record<string, unknown>> {
     const rows: Record<string, unknown>[] = [];
     const disk: Record<string, Record<string, unknown>> = {};
-    for (const s of listSessions()) disk[String(s.name)] = s;
-    const names = new Set([...Object.keys(disk), ...Object.keys(this.sessions)]);
-    for (const name of [...names].sort()) {
-      const rec = { ...(disk[name] || { name }) };
-      const live = this.sessions[name];
+    for (const s of listSessions()) disk[String(s.id)] = s;
+    const ids = new Set([...Object.keys(disk), ...Object.keys(this.sessions)]);
+    for (const id of [...ids].sort()) {
+      const rec = { ...(disk[id] || { id }) };
+      rec.id = id;
+      const live = this.sessions[id];
       if (live) {
         rec.alive = live.alive;
         rec.lock = live.lock;
-        rec.sdk_session_id = live.sdkSessionId;
+        rec.name = live.name;
+        rec.title = live.title;
+        rec.cwd = live.cwd;
+        rec.sdk_session_id = live.id;
         rec.pending = Object.entries(live.pending).map(([k, v]) => ({
           tool_use_id: k,
           tool: v.tool,
           reason: v.reason,
         }));
       }
+      if (!("name" in rec)) rec.name = "";
+      if (!("title" in rec)) rec.title = null;
+      if (!("sdk_session_id" in rec)) rec.sdk_session_id = id;
       if (!("last_turn" in rec)) rec.last_turn = null;
       if (!("last_task" in rec)) rec.last_task = null;
       if (!("pending" in rec)) rec.pending = [];
@@ -534,10 +556,10 @@ class Host {
   }
 
   async cmdEvents(req: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const name = req.name as string | undefined;
-    if (!name) return { ok: false, error: "name required" };
-    const evs = readEvents(name, (req.tail as number | null | undefined) ?? null);
-    return { ok: true, name, events: evs };
+    const resolved = resolveSessionId(lookupKey(req), this.sessionRefs());
+    if (!resolved.ok) return resolved;
+    const evs = readEvents(resolved.id, (req.tail as number | null | undefined) ?? null);
+    return { ok: true, id: resolved.id, events: evs };
   }
 
   async cmdShutdown(_req: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -553,16 +575,34 @@ class Host {
     return { ok: true };
   }
 
-  need(name: string | undefined): Session | Record<string, unknown> {
-    if (!name) return { ok: false, error: "name required" };
-    const sess = this.sessions[name];
-    if (!sess) return { ok: false, error: `unknown session ${name}` };
+  sessionRefs(): SessionRef[] {
+    const map = new Map<string, SessionRef>();
+    for (const s of listSessions()) {
+      const id = String(s.id ?? "");
+      if (!id) continue;
+      map.set(id, {
+        id,
+        name: s.name ? String(s.name) : undefined,
+        title: s.title ? String(s.title) : undefined,
+      });
+    }
+    for (const [id, s] of Object.entries(this.sessions)) {
+      map.set(id, { id, name: s.name || undefined, title: s.title || undefined });
+    }
+    return [...map.values()];
+  }
+
+  need(req: Record<string, unknown>): Session | Record<string, unknown> {
+    const resolved = resolveSessionId(lookupKey(req), this.sessionRefs());
+    if (!resolved.ok) return resolved;
+    const sess = this.sessions[resolved.id];
+    if (!sess) return { ok: false, error: `unknown session ${resolved.id}` };
     return sess;
   }
 
-  async teardown(name: string): Promise<void> {
-    const sess = this.sessions[name];
-    delete this.sessions[name];
+  async teardown(id: string): Promise<void> {
+    const sess = this.sessions[id];
+    delete this.sessions[id];
     if (!sess) return;
     for (const item of Object.values(sess.pending)) {
       if (!item.done) item.reject(new Error("cancelled"));
@@ -576,6 +616,28 @@ class Host {
       }
     }
     sess.persist();
+  }
+}
+
+function lookupKey(req: Record<string, unknown>): string | undefined {
+  const id = req.id;
+  if (typeof id === "string" && id) return id;
+  const name = req.name;
+  if (typeof name === "string" && name) return name;
+  return undefined;
+}
+
+async function refreshClaudeTitle(sess: Session): Promise<void> {
+  try {
+    const sdk = await import("@anthropic-ai/claude-agent-sdk");
+    if (typeof sdk.getSessionInfo !== "function") return;
+    const info = await sdk.getSessionInfo(sess.id, { dir: sess.cwd });
+    if (!info) return;
+    const rec = info as { customTitle?: string; aiTitle?: string; summary?: string };
+    const title = rec.customTitle || rec.aiTitle || rec.summary;
+    if (title) sess.title = title;
+  } catch {
+    /* title is display-only */
   }
 }
 

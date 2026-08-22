@@ -12,18 +12,20 @@ send always uses client.query on the live client (P3). hold sets
 lock=operator and blocks send plus auto-allow (P4). ResultMessage
 is turn_done only, not task finished (P6).
 
+Identity: id is the Claude session UUID (options.sessionId / resume). title is Claude display (customTitle/summary). name is an optional operator label, not a key.
+
 ## Invoke (TypeScript)
 
     npx tsx src/cli.ts up|down|status
-    npx tsx src/cli.ts start NAME --cwd DIR --prompt TEXT [--resume-id ID]
-    npx tsx src/cli.ts send NAME TEXT
-    npx tsx src/cli.ts interrupt|hold|release|stop NAME
-    npx tsx src/cli.ts approve|deny NAME tool_use_id
-    npx tsx src/cli.ts events NAME [--tail N]
+    npx tsx src/cli.ts start --cwd DIR --prompt TEXT [--name LABEL] [--resume-id UUID]
+    npx tsx src/cli.ts send ID TEXT
+    npx tsx src/cli.ts interrupt|hold|release|stop ID
+    npx tsx src/cli.ts approve|deny ID tool_use_id
+    npx tsx src/cli.ts events ID [--tail N]
 
 npm scripts: `npm start -- <cmd>`, `npm run up`, `npm test`.
 
-Full P1-P8 design, mechanism, and example JSON: see README.md
+P1-P8 writeup: DESIGN.md. Commands and JSON: README.md
 (Chinese primary). Do not treat README as a user-facing product page.
 
 ## Policy / classify

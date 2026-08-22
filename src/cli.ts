@@ -132,27 +132,27 @@ async function rpc(req: Record<string, unknown>, timeout = 60): Promise<void> {
 function parseArgs(argv: string[]): { cmd: string; args: Record<string, unknown> } {
   const [cmd, ...rest] = argv;
   if (!cmd) {
-    process.stderr.write("usage: tsx src/cli.ts <up|down|start|send|...>\n");
+    process.stderr.write("usage: tsx src/cli.ts <up|down|start|send|...>  (session commands take ID)\n");
     process.exit(2);
   }
   const args: Record<string, unknown> = {};
   if (cmd === "start") {
-    args.name = rest[0];
-    for (let i = 1; i < rest.length; i++) {
+    for (let i = 0; i < rest.length; i++) {
       if (rest[i] === "--cwd") args.cwd = rest[++i];
       else if (rest[i] === "--prompt") args.prompt = rest[++i];
       else if (rest[i] === "--resume-id") args.resume_id = rest[++i];
+      else if (rest[i] === "--name" || rest[i] === "-n") args.name = rest[++i];
     }
   } else if (cmd === "send") {
-    args.name = rest[0];
+    args.id = rest[0];
     args.text = rest.slice(1).join(" ");
   } else if (["interrupt", "hold", "release", "stop"].includes(cmd)) {
-    args.name = rest[0];
+    args.id = rest[0];
   } else if (cmd === "approve" || cmd === "deny") {
-    args.name = rest[0];
+    args.id = rest[0];
     args.tool_use_id = rest[1];
   } else if (cmd === "events") {
-    args.name = rest[0];
+    args.id = rest[0];
     for (let i = 1; i < rest.length; i++) {
       if (rest[i] === "--tail") args.tail = parseInt(rest[++i], 10);
     }
@@ -175,7 +175,7 @@ export async function main(argv?: string[]): Promise<void> {
     return rpc(
       {
         cmd: "start",
-        name: args.name,
+        name: args.name ?? "",
         cwd: args.cwd,
         prompt: args.prompt,
         resume_id: args.resume_id ?? null,
@@ -183,11 +183,11 @@ export async function main(argv?: string[]): Promise<void> {
       120,
     );
   }
-  if (cmd === "send") return rpc({ cmd: "send", name: args.name, text: args.text });
-  if (["interrupt", "hold", "release", "stop"].includes(cmd)) return rpc({ cmd, name: args.name });
-  if (cmd === "approve") return rpc({ cmd: "approve", name: args.name, tool_use_id: args.tool_use_id });
-  if (cmd === "deny") return rpc({ cmd: "deny", name: args.name, tool_use_id: args.tool_use_id });
-  if (cmd === "events") return rpc({ cmd: "events", name: args.name, tail: args.tail ?? null });
+  if (cmd === "send") return rpc({ cmd: "send", id: args.id, text: args.text });
+  if (["interrupt", "hold", "release", "stop"].includes(cmd)) return rpc({ cmd, id: args.id });
+  if (cmd === "approve") return rpc({ cmd: "approve", id: args.id, tool_use_id: args.tool_use_id });
+  if (cmd === "deny") return rpc({ cmd: "deny", id: args.id, tool_use_id: args.tool_use_id });
+  if (cmd === "events") return rpc({ cmd: "events", id: args.id, tail: args.tail ?? null });
   out({ ok: false, error: `unknown cmd ${cmd}` }, 1);
 }
 
