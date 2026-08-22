@@ -94,6 +94,12 @@ sequenceDiagram
     npx tsx src/cli.ts task-stop ID TASK_ID
     npx tsx src/cli.ts task-bg ID [tool_use_id]
     npx tsx src/cli.ts subagents ID
+    npx tsx src/cli.ts mcp ID
+    npx tsx src/cli.ts mcp-set ID --json '{...}'   # or stdin JSON; {} allowed
+    npx tsx src/cli.ts mcp-reconnect ID SERVER
+    npx tsx src/cli.ts mcp-toggle ID SERVER --on|--off
+    npx tsx src/cli.ts plugins-reload ID
+    npx tsx src/cli.ts skills-reload ID
 
 等价：npm start -- status ； npm run up。
 
@@ -139,7 +145,7 @@ cost_usd 是 SDK 估算（ResultMessage.total_cost_usd，流式 query() 取最�
 
 例 info / workflows：
 
-    {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "effort": "max", "enable_workflows": true, "skills": ["pdf"], "slash_commands": ["/compact"], "plugins": [], "usage": {"cost_usd": 0.12, "model_usage": {}, "last_turn_usage": {}, "updated_ts": 1770000000.1}, "cost_usd": 0.12, "input_tokens": 150, "output_tokens": 28, "cache_read_input_tokens": 6, "cache_creation_input_tokens": 3, "model_usage": {}}
+    {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "effort": "max", "enable_workflows": true, "skills": ["pdf"], "slash_commands": ["/compact"], "plugins": [], "mcp_servers": [], "usage": {"cost_usd": 0.12, "model_usage": {}, "last_turn_usage": {}, "updated_ts": 1770000000.1}, "cost_usd": 0.12, "input_tokens": 150, "output_tokens": 28, "cache_read_input_tokens": 6, "cache_creation_input_tokens": 3, "model_usage": {}}
     {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "skills": ["pdf"], "slash_commands": ["/compact"], "plugins": [], "note": "listed from session advertise (init); host does not invoke workflows — the model does"}
 
 没有单独的 invoke-workflow RPC。settingSources 已是 user+project+local，磁盘上的 Claude Code dynamic workflows 由模型自己触发；host 只列出 session 广告过的 skills / slash_commands / plugins。
@@ -151,6 +157,18 @@ cost_usd 是 SDK 估算（ResultMessage.total_cost_usd，流式 query() 取最�
     {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "backgrounded": true, "tool_use_id": null}
     {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "source": "sdk", "subagents": ["agent-..."]}
     {"ok": false, "error": "stopTask is not available on this client (Python-shaped / no Query.stopTask)"}
+
+例 mcp / mcp-set / mcp-reconnect / mcp-toggle / plugins-reload / skills-reload（都是活 Query 方法，不是 host 自造 token）：
+
+    {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "servers": []}
+    {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "result": {"added": [], "removed": [], "errors": {}}}
+    {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "server": "github"}
+    {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "server": "github", "enabled": false}
+    {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "result": {"commands": [], "agents": [], "plugins": [], "mcpServers": [], "error_count": 0}}
+    {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "result": {"skills": []}}
+    {"ok": false, "error": "mcpServerStatus is not available on this client (Python-shaped / no Query.mcpServerStatus)"}
+
+`mcp-set` 把 JSON 对象交给 Query.setMcpServers。空对象 `{}` 合法，只清动态加的 server，不会卸掉 plugin 拥有的 server。`info ID` 在活客户端上便宜时带 `mcp_servers` 快照。
 
 例 events：
 

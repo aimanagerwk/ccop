@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { LOG_PATH, PID_PATH, ROOT, SOCK_PATH, ensureData } from "./paths.js";
+import { parseArgs } from "./parse.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -129,42 +130,26 @@ async function rpc(req: Record<string, unknown>, timeout = 60): Promise<void> {
   }
 }
 
-function parseArgs(argv: string[]): { cmd: string; args: Record<string, unknown> } {
-  const [cmd, ...rest] = argv;
-  if (!cmd) {
-    process.stderr.write("usage: tsx src/cli.ts <up|down|start|send|...>  (session commands take ID)\n");
-    process.exit(2);
+function readStdinText(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    process.stdin.on("data", (c) => chunks.push(Buffer.from(c)));
+    process.stdin.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    process.stdin.on("error", reject);
+  });
+}
+
+async function parseJsonObject(raw: string, label: string): Promise<Record<string, unknown>> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (exc: any) {
+    out({ ok: false, error: `${label}: invalid JSON (${exc?.message || exc})` }, 1);
   }
-  const args: Record<string, unknown> = {};
-  if (cmd === "start") {
-    for (let i = 0; i < rest.length; i++) {
-      if (rest[i] === "--cwd") args.cwd = rest[++i];
-      else if (rest[i] === "--prompt") args.prompt = rest[++i];
-      else if (rest[i] === "--resume-id") args.resume_id = rest[++i];
-      else if (rest[i] === "--name" || rest[i] === "-n") args.name = rest[++i];
-      else if (rest[i] === "--permission-mode") args.permission_mode = rest[++i];
-    }
-  } else if (cmd === "send") {
-    args.id = rest[0];
-    args.text = rest.slice(1).join(" ");
-  } else if (["interrupt", "hold", "release", "stop", "info", "workflows", "tasks", "subagents"].includes(cmd)) {
-    args.id = rest[0];
-  } else if (cmd === "task-stop") {
-    args.id = rest[0];
-    args.task_id = rest[1];
-  } else if (cmd === "task-bg") {
-    args.id = rest[0];
-    if (rest[1]) args.tool_use_id = rest[1];
-  } else if (cmd === "approve" || cmd === "deny") {
-    args.id = rest[0];
-    args.tool_use_id = rest[1];
-  } else if (cmd === "events") {
-    args.id = rest[0];
-    for (let i = 1; i < rest.length; i++) {
-      if (rest[i] === "--tail") args.tail = parseInt(rest[++i], 10);
-    }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    out({ ok: false, error: `${label}: expected a JSON object` }, 1);
   }
-  return { cmd, args };
+  return parsed as Record<string, unknown>;
 }
 
 export async function main(argv?: string[]): Promise<void> {
@@ -200,6 +185,23 @@ export async function main(argv?: string[]): Promise<void> {
   if (cmd === "approve") return rpc({ cmd: "approve", id: args.id, tool_use_id: args.tool_use_id });
   if (cmd === "deny") return rpc({ cmd: "deny", id: args.id, tool_use_id: args.tool_use_id });
   if (cmd === "events") return rpc({ cmd: "events", id: args.id, tail: args.tail ?? null });
+  if (cmd === "mcp") return rpc({ cmd: "mcp", id: args.id });
+  if (cmd === "mcp-set") {
+    let raw: string;
+    if (typeof args.json === "string") raw = args.json;
+    else raw = await readStdinText();
+    const servers = await parseJsonObject(raw || "", "mcp-set");
+    return rpc({ cmd: "mcp-set", id: args.id, servers }, 120);
+  }
+  if (cmd === "mcp-reconnect") return rpc({ cmd: "mcp-reconnect", id: args.id, server: args.server });
+  if (cmd === "mcp-toggle") {
+    if (args.enabled !== true && args.enabled !== false) {
+      out({ ok: false, error: "mcp-toggle requires --on or --off" }, 1);
+    }
+    return rpc({ cmd: "mcp-toggle", id: args.id, server: args.server, enabled: args.enabled });
+  }
+  if (cmd === "plugins-reload") return rpc({ cmd: "plugins-reload", id: args.id }, 120);
+  if (cmd === "skills-reload") return rpc({ cmd: "skills-reload", id: args.id }, 120);
   out({ ok: false, error: `unknown cmd ${cmd}` }, 1);
 }
 

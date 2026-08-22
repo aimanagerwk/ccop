@@ -245,3 +245,9 @@ session init 广告的 `skills` / `slash_commands` / `plugins` 落盘；`workflo
 从 `task_notification` / `task_started` / `task_progress` / `background_tasks_changed` 和 SubagentStart/Stop hook 跟踪任务。CLI：`tasks` / `task-stop` / `task-bg` / `subagents`。`stopTask` / `backgroundTasks` 走活 Query；Python 形客户端没有这些方法时返回明确错误。`listSubagents` 优先 SDK，否则用跟踪列表。
 
 每条 session **硬编码** `effort: "max"` + `enableWorkflows: true`（`ultracode: false`）。dynamic workflow 一直开，不做成可关选项。
+
+### Host-gap：MCP / plugins / skills 是活 Query，不是自造 token
+
+Query 已有 `mcpServerStatus` / `setMcpServers` / `reconnectMcpServer` / `toggleMcpServer` / `reloadPlugins` / `reloadSkills`。host 只是把它们绑到 LiveClient（缺方法时与 `stopTask` 同样的明确错误），再暴露 CLI：`mcp`、`mcp-set`、`mcp-reconnect`、`mcp-toggle`、`plugins-reload`、`skills-reload`。
+
+`setMcpServers` 走当前会话的 SDK Query，不发明 MCP token、不写 secrets。空对象 `{}` 只影响动态加的 server；plugin 拥有的 server 不会因此被卸掉（SDK 自己的语义）。

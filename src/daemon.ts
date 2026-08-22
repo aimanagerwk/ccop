@@ -66,17 +66,49 @@ function queryMethodMissing(name: string): never {
   throw new Error(`${name} is not available on this client (Python-shaped / no Query.${name})`);
 }
 
-function bindQueryControl(obj: any): Pick<LiveClient, "stopTask" | "backgroundTasks"> {
+function queryFn(obj: any, name: string, snake: string): (...a: any[]) => any {
+  const fn = obj?.[name] ?? obj?.[snake];
+  if (typeof fn !== "function") queryMethodMissing(name);
+  return fn.bind(obj);
+}
+
+function bindQueryControl(
+  obj: any,
+): Pick<
+  LiveClient,
+  | "stopTask"
+  | "backgroundTasks"
+  | "mcpServerStatus"
+  | "setMcpServers"
+  | "reconnectMcpServer"
+  | "toggleMcpServer"
+  | "reloadPlugins"
+  | "reloadSkills"
+> {
   return {
     async stopTask(taskId: string) {
-      const fn = obj?.stopTask ?? obj?.stop_task;
-      if (typeof fn !== "function") queryMethodMissing("stopTask");
-      await fn.call(obj, taskId);
+      await queryFn(obj, "stopTask", "stop_task")(taskId);
     },
     async backgroundTasks(toolUseId?: string) {
-      const fn = obj?.backgroundTasks ?? obj?.background_tasks;
-      if (typeof fn !== "function") queryMethodMissing("backgroundTasks");
-      return await fn.call(obj, toolUseId);
+      return await queryFn(obj, "backgroundTasks", "background_tasks")(toolUseId);
+    },
+    async mcpServerStatus() {
+      return await queryFn(obj, "mcpServerStatus", "mcp_server_status")();
+    },
+    async setMcpServers(servers: Record<string, unknown>) {
+      return await queryFn(obj, "setMcpServers", "set_mcp_servers")(servers);
+    },
+    async reconnectMcpServer(name: string) {
+      await queryFn(obj, "reconnectMcpServer", "reconnect_mcp_server")(name);
+    },
+    async toggleMcpServer(name: string, enabled: boolean) {
+      await queryFn(obj, "toggleMcpServer", "toggle_mcp_server")(name, enabled);
+    },
+    async reloadPlugins() {
+      return await queryFn(obj, "reloadPlugins", "reload_plugins")();
+    },
+    async reloadSkills() {
+      return await queryFn(obj, "reloadSkills", "reload_skills")();
     },
   };
 }
@@ -89,6 +121,12 @@ type LiveClient = {
   getServerInfo: () => Promise<unknown>;
   stopTask: (taskId: string) => Promise<void>;
   backgroundTasks: (toolUseId?: string) => Promise<boolean>;
+  mcpServerStatus: () => Promise<unknown>;
+  setMcpServers: (servers: Record<string, unknown>) => Promise<unknown>;
+  reconnectMcpServer: (name: string) => Promise<void>;
+  toggleMcpServer: (name: string, enabled: boolean) => Promise<void>;
+  reloadPlugins: () => Promise<unknown>;
+  reloadSkills: () => Promise<unknown>;
 };
 
 async function openLiveClient(options: Record<string, unknown>, firstPrompt: string): Promise<LiveClient> {
@@ -597,6 +635,12 @@ class Host {
       "task-stop": (r) => this.cmdTaskStop(r),
       "task-bg": (r) => this.cmdTaskBg(r),
       subagents: (r) => this.cmdSubagents(r),
+      mcp: (r) => this.cmdMcp(r),
+      "mcp-set": (r) => this.cmdMcpSet(r),
+      "mcp-reconnect": (r) => this.cmdMcpReconnect(r),
+      "mcp-toggle": (r) => this.cmdMcpToggle(r),
+      "plugins-reload": (r) => this.cmdPluginsReload(r),
+      "skills-reload": (r) => this.cmdSkillsReload(r),
       shutdown: (r) => this.cmdShutdown(r),
     };
     const fn = fns[String(cmd)];
@@ -845,6 +889,15 @@ class Host {
     if (!resolved.ok) return resolved;
     const { rec } = this.diskOrLive(resolved.id);
     const usage = (rec.usage as SessionUsage | null) ?? null;
+    let mcp_servers: unknown = undefined;
+    const live = this.sessions[resolved.id];
+    if (live?.client && live.alive) {
+      try {
+        mcp_servers = await live.client.mcpServerStatus();
+      } catch {
+        /* omit if Query method missing or transport fails */
+      }
+    }
     return {
       ok: true,
       id: resolved.id,
@@ -854,6 +907,7 @@ class Host {
       skills: rec.skills ?? [],
       slash_commands: rec.slash_commands ?? [],
       plugins: rec.plugins ?? [],
+      ...(mcp_servers !== undefined ? { mcp_servers } : {}),
       usage,
       ...usageStatusFields(usage),
     };
@@ -903,6 +957,104 @@ class Host {
     try {
       const backgrounded = await sess.client.backgroundTasks(toolUseId);
       return { ok: true, id: sess.id, backgrounded, tool_use_id: toolUseId ?? null };
+    } catch (exc: any) {
+      return { ok: false, error: String(exc?.message || exc) };
+    }
+  }
+
+  needLive(req: Record<string, unknown>): Session | Record<string, unknown> {
+    const sess = this.need(req);
+    if (!(sess instanceof Session)) return sess;
+    if (!sess.client || !sess.alive) return { ok: false, error: "session not live" };
+    return sess;
+  }
+
+  async cmdMcp(req: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const sess = this.needLive(req);
+    if (!(sess instanceof Session)) return sess;
+    try {
+      const servers = await sess.client!.mcpServerStatus();
+      return { ok: true, id: sess.id, servers };
+    } catch (exc: any) {
+      return { ok: false, error: String(exc?.message || exc) };
+    }
+  }
+
+  async cmdMcpSet(req: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const sess = this.needLive(req);
+    if (!(sess instanceof Session)) return sess;
+    const servers = req.servers;
+    if (!servers || typeof servers !== "object" || Array.isArray(servers)) {
+      return { ok: false, error: "mcp-set requires a JSON object of servers (empty object allowed)" };
+    }
+    try {
+      const result = await sess.client!.setMcpServers(servers as Record<string, unknown>);
+      return { ok: true, id: sess.id, result };
+    } catch (exc: any) {
+      return { ok: false, error: String(exc?.message || exc) };
+    }
+  }
+
+  async cmdMcpReconnect(req: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const sess = this.needLive(req);
+    if (!(sess instanceof Session)) return sess;
+    const server = req.server as string | undefined;
+    if (!server) return { ok: false, error: "server required" };
+    try {
+      await sess.client!.reconnectMcpServer(server);
+      return { ok: true, id: sess.id, server };
+    } catch (exc: any) {
+      return { ok: false, error: String(exc?.message || exc) };
+    }
+  }
+
+  async cmdMcpToggle(req: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const sess = this.needLive(req);
+    if (!(sess instanceof Session)) return sess;
+    const server = req.server as string | undefined;
+    if (!server) return { ok: false, error: "server required" };
+    if (req.enabled !== true && req.enabled !== false) {
+      return { ok: false, error: "enabled required (true/false)" };
+    }
+    try {
+      await sess.client!.toggleMcpServer(server, Boolean(req.enabled));
+      return { ok: true, id: sess.id, server, enabled: Boolean(req.enabled) };
+    } catch (exc: any) {
+      return { ok: false, error: String(exc?.message || exc) };
+    }
+  }
+
+  applyReloadAdvertised(sess: Session, result: any): void {
+    if (!result || typeof result !== "object") return;
+    if (Array.isArray(result.plugins)) sess.plugins = result.plugins;
+    if (Array.isArray(result.commands)) {
+      sess.slash_commands = result.commands.map((c: any) => (typeof c === "string" ? c : c?.name || String(c)));
+    }
+    if (Array.isArray(result.skills)) {
+      sess.skills = result.skills.map((c: any) => (typeof c === "string" ? c : c?.name || String(c)));
+    }
+    sess.persist();
+  }
+
+  async cmdPluginsReload(req: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const sess = this.needLive(req);
+    if (!(sess instanceof Session)) return sess;
+    try {
+      const result = await sess.client!.reloadPlugins();
+      this.applyReloadAdvertised(sess, result);
+      return { ok: true, id: sess.id, result };
+    } catch (exc: any) {
+      return { ok: false, error: String(exc?.message || exc) };
+    }
+  }
+
+  async cmdSkillsReload(req: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const sess = this.needLive(req);
+    if (!(sess instanceof Session)) return sess;
+    try {
+      const result = await sess.client!.reloadSkills();
+      this.applyReloadAdvertised(sess, result);
+      return { ok: true, id: sess.id, result };
     } catch (exc: any) {
       return { ok: false, error: String(exc?.message || exc) };
     }

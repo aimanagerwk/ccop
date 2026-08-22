@@ -1,0 +1,201 @@
+{
+  "cwd": "/workspace/hello-cc",
+  "sessions": {
+    "plan": "00511fe2-29f3-48ad-b505-1080453b255a",
+    "auto": "6f5d6575-542f-4a89-ad17-7b65165d4d41"
+  },
+  "product_default_permission_mode": "auto",
+  "counts": {
+    "ok": 17,
+    "fail": 4,
+    "host-gap": 3,
+    "skip": 1
+  },
+  "notes": [
+    "Live ENGINE coverage: plan, MCP, plugins, Task/Agent subagent, multiagent.",
+    "SDK plan mode did not block Write after host approve — fail plan-blocks-write.",
+    "ExitPlanMode never fired — fail plan-exit-approve.",
+    "Zero MCP servers and zero plugins are valid live results.",
+    "ccop has no mcp command; Query.mcpServerStatus/setMcpServers/reconnectMcpServer/reloadPlugins are host-gaps.",
+    "Engine tool name is Agent (not Task). Two Agents one turn but serial execution.",
+    "task-bg not proven mid-flight. task-stop on live local_agent worked.",
+    "Daemon left up. No git commit/push. No marketplace plugins. No invented MCP tokens."
+  ],
+  "rows": [
+    {
+      "id": "plan-start",
+      "feature": "start --permission-mode plan",
+      "attempted": true,
+      "evidence": "00511fe2-29f3-48ad-b505-1080453b255a start ok permission_mode=plan cwd=/workspace/hello-cc name=engine-plan",
+      "result": "ok"
+    },
+    {
+      "id": "plan-info-mode",
+      "feature": "info.permission_mode after plan start",
+      "attempted": true,
+      "evidence": "info 00511fe2-29f3-48ad-b505-1080453b255a permission_mode=plan effort=max enable_workflows=true",
+      "result": "ok"
+    },
+    {
+      "id": "plan-blocks-write",
+      "feature": "plan mode blocks Write/Edit implementation",
+      "attempted": true,
+      "evidence": "FAIL: SDK plan is a no-op for execution after host approve. Host parked Write reason=ask (mode!==auto) call-6b3c9971-…-1 hello.py; approve ok; PostToolUse; hello.py now starts with # engine-cov-plan. Second Write engine-plan-probe.txt still pending ask. No SDK deny / ExitPlanMode.",
+      "result": "fail"
+    },
+    {
+      "id": "plan-exit-approve",
+      "feature": "ExitPlanMode park + approve/deny",
+      "attempted": true,
+      "evidence": "ExitPlanMode never emitted. Prompted twice (start: do not call; later: Call ExitPlanMode now). Events only Read then Write. Session still pending Write call-6b3c9971-…-2. No AskUserQuestion.",
+      "result": "fail"
+    },
+    {
+      "id": "plan-needs-decision",
+      "feature": "plan mode needs_decision / AskUserQuestion",
+      "attempted": true,
+      "evidence": "needs_decision=true from host can_use_tool parked Write + PermissionRequest Write. AskUserQuestion=false.",
+      "result": "ok"
+    },
+    {
+      "id": "mcp-status-or-empty",
+      "feature": "MCP status or empty (live)",
+      "attempted": true,
+      "evidence": "Live prompt on 6f5d6575-542f-4a89-ad17-7b65165d4d41: turn_done result=ZERO MCP SERVERS. info/workflows plugins=[]. slash includes mcp. Host does not persist init.mcp_servers. No MCP tokens invented.",
+      "result": "ok"
+    },
+    {
+      "id": "mcp-host-rpc",
+      "feature": "host MCP RPCs (mcp/mcpServerStatus/setMcpServers/reconnect)",
+      "attempted": true,
+      "evidence": "cli mcp + rpc mcpServerStatus/setMcpServers/reconnectMcpServer each {ok:false,error:unknown cmd …}. LiveClient does not wrap Query.mcpServerStatus. ccop has no mcp command.",
+      "result": "host-gap"
+    },
+    {
+      "id": "mcp-host-cmd",
+      "feature": "host CLI cmd mcp",
+      "attempted": true,
+      "evidence": "{\"ok\":false,\"error\":\"unknown cmd mcp\"}",
+      "result": "host-gap"
+    },
+    {
+      "id": "mcp-connect-optional",
+      "feature": "optional local dummy stdio MCP connect",
+      "attempted": false,
+      "evidence": "skip: no host setMcpServers / start options.mcpServers. Zero servers already recorded. Too heavy without host RPC.",
+      "result": "skip"
+    },
+    {
+      "id": "plugin-advertise",
+      "feature": "init/info/workflows advertised plugins + slash/skills",
+      "attempted": true,
+      "evidence": "6f5d6575-542f-4a89-ad17-7b65165d4d41+00511fe2-29f3-48ad-b505-1080453b255a info.plugins=[] nSkills=14 nSlash=38 slash includes mcp,reload-skills,agents. skills: deep-research,dataviz,update-config,verify,debug,code-review,simplify,batch,fewer-permission-prompts,doctor,loop,claude-api,run,run-skill-generator. Zero plugins is a valid live advertise.",
+      "result": "ok"
+    },
+    {
+      "id": "plugin-reload",
+      "feature": "reloadPlugins Query method via host",
+      "attempted": true,
+      "evidence": "rpc reloadPlugins {ok:false,error:unknown cmd reloadPlugins}. LiveClient binds only stopTask/backgroundTasks; cmdInfo does not call client.reloadPlugins. Did not install marketplace plugins.",
+      "result": "host-gap"
+    },
+    {
+      "id": "plugin-slash-from-plugins",
+      "feature": "slash/skills from plugins",
+      "attempted": true,
+      "evidence": "plugins=[] so no plugin-provided slash/skills. Advertised slash/skills are builtin/user, not plugins.",
+      "result": "ok"
+    },
+    {
+      "id": "subagent-spawn",
+      "feature": "Task/Explore/general-purpose subagent reads a file",
+      "attempted": true,
+      "evidence": "6f5d6575-542f-4a89-ad17-7b65165d4d41 tool Agent call-44fb82c8-…-0 input={subagent_type:Explore,run_in_background:false,prompt:Read hello.py}. task_started task_id=a77af3aef76bae944 task_type=local_agent spawn_depth=1 is_backgrounded=false. SubagentStart agent_type=Explore. task_done returned hello.py text. Tool name is Agent not Task; no Workflow.",
+      "result": "ok"
+    },
+    {
+      "id": "subagent-hooks",
+      "feature": "SubagentStart/Stop events",
+      "attempted": true,
+      "evidence": "4 SubagentStart + 3 SubagentStop (Explore,Explore,Explore) + 1 Start general-purpose then killed. agent_ids a77af3aef76bae944, a264875d639a24935, a30dbece4faf7b429, a6e1af3febb5689fb.",
+      "result": "ok"
+    },
+    {
+      "id": "subagents-rpc",
+      "feature": "subagents ID lists sdk or tracked",
+      "attempted": true,
+      "evidence": "subagents 6f5d6575-542f-4a89-ad17-7b65165d4d41 ok source=sdk ids=[a264875d639a24935,a30dbece4faf7b429,a6e1af3febb5689fb,a77af3aef76bae944]",
+      "result": "ok"
+    },
+    {
+      "id": "task-started-fields",
+      "feature": "task_started local_agent / spawn_depth / is_backgrounded / subagent_type",
+      "attempted": true,
+      "evidence": "task_started extras: task_type=local_agent spawn_depth=1. Foreground Explore is_backgrounded=false; later general-purpose is_backgrounded=true. subagent_type on task_progress (Explore) not on task_started. No Workflow local_workflow this run.",
+      "result": "ok"
+    },
+    {
+      "id": "tasks-rpc",
+      "feature": "tasks ID shows task_id/status/summary",
+      "attempted": true,
+      "evidence": "tasks 6f5d6575-542f-4a89-ad17-7b65165d4d41 n=4: a77af3… completed, a264875… completed, a30dbe… completed, a6e1af… stopped. Fields task_id,status,summary,tool_use_id,usage.",
+      "result": "ok"
+    },
+    {
+      "id": "task-progress-updated-notif",
+      "feature": "task_progress / task_updated / task_notification",
+      "attempted": true,
+      "evidence": "task_progress (Read/Bash last_tool_name, subagent_type=Explore). task_updated patch.status=completed then killed. task_notification completed -> kind=task_done; stopped -> kind=interrupted status=stopped.",
+      "result": "ok"
+    },
+    {
+      "id": "task-tool-vs-workflow",
+      "feature": "Task/Agent tool vs Workflow vs Bash background",
+      "attempted": true,
+      "evidence": "Parent tool name=Agent (not Task, not Workflow). 4 Agent tool_use. Explore used Read; one Explore used Bash for Grep (foreground subagent, not Bash run_in_background). No Workflow tool this run.",
+      "result": "ok"
+    },
+    {
+      "id": "task-bg-while-running",
+      "feature": "task-bg while Task/subagent running",
+      "attempted": true,
+      "evidence": "FAIL mid-flight: first Explore already completed when task-bg called; RPC {ok:true,backgrounded:true,tool_use_id:null} after complete — not proof of foreground-to-background. Later Agent run_in_background=true started already backgrounded (is_backgrounded=true) then task-stop.",
+      "result": "fail"
+    },
+    {
+      "id": "task-stop-live-subagent",
+      "feature": "task-stop on LIVE Task/subagent (not only workflow)",
+      "attempted": true,
+      "evidence": "Caught running a6e1af3febb5689fb (general-purpose, is_backgrounded=true). task-stop ok. task_updated patch.status=killed; task_notification status=stopped; tasks RPC status=stopped. Same host RPC as WF-COVERAGE workflow stop, this time local_agent.",
+      "result": "ok"
+    },
+    {
+      "id": "multiagent-two-subagents",
+      "feature": "two Task/Agent subagents in one turn",
+      "attempted": true,
+      "evidence": "Same turn two tool Agent 5ms apart: call-e8d05be4-…-1 Explore Read hello.py; call-e8d05be4-…-2 Explore Grep Hello. Two SubagentStart Explore (a264875d639a24935, a30dbece4faf7b429). tasks n went to 3.",
+      "result": "ok"
+    },
+    {
+      "id": "multiagent-concurrent",
+      "feature": "two subagents run concurrently",
+      "attempted": true,
+      "evidence": "FAIL: emitted in parallel but executed serially. a264875 SubagentStop ts=1787413729.93; a30dbe task_started ts=1787413733.433 (~3.5s later). No overlapping running pair.",
+      "result": "fail"
+    },
+    {
+      "id": "multiagent-tasks-count",
+      "feature": "tasks list count after two subagents",
+      "attempted": true,
+      "evidence": "After pair: 3 tasks (prior Explore + 2 new). Final n=4 after later general-purpose.",
+      "result": "ok"
+    },
+    {
+      "id": "daemon-up-end",
+      "feature": "daemon left up",
+      "attempted": true,
+      "evidence": "status ok=true; live 00511fe2-29f3-48ad-b505-1080453b255a (plan, pending Write) and 6f5d6575-542f-4a89-ad17-7b65165d4d41 (auto). No commit/push.",
+      "result": "ok"
+    }
+  ]
+}
