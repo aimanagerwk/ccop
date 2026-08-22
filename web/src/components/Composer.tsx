@@ -47,7 +47,7 @@ export function Composer(props: {
     const sent = await rpc("send", { id: props.id, text: payload }, props.serverId);
     setBusy(false);
     if (!sent.ok) {
-      setErr(String(sent.error || "已落盘但通知失败"));
+      setErr(String(sent.error || "文件已保存，但通知会话失败"));
       return;
     }
     setNote(uploadTempNote(res.path));
@@ -58,14 +58,25 @@ export function Composer(props: {
   const blocked = !props.enabled || !props.id || props.held || !text || busy;
   return (
     <div className="bottom">
-      {props.held ? <div className="err">已挂起 — 不能发送</div> : null}
+      {props.held ? <div className="err">已挂起，无法发送</div> : null}
       {note ? <div className="ok tiny">{note}</div> : null}
-      <div className="row">
-        <label className="filebtn">
-          <span>夹文件</span>
+      <div className="composer">
+        <label className="iconbtn" title="附加文件">
+          <span aria-hidden>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M10.2 3.6 4.55 9.25a2.3 2.3 0 1 0 3.25 3.25l5.3-5.3a1.6 1.6 0 0 0-2.26-2.26l-5.3 5.3"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+              />
+            </svg>
+          </span>
+          <span className="sr-only">附加文件</span>
           <input
             ref={fileRef}
             type="file"
+            aria-label="附加文件"
             disabled={!props.enabled || !props.id || props.held || busy}
             onChange={(e) => {
               const f = e.target.files?.[0];
@@ -74,12 +85,11 @@ export function Composer(props: {
           />
         </label>
         <textarea
-          className="grow"
           rows={2}
           value={text}
           onChange={(e) => setText(e.target.value)}
           disabled={!props.enabled || !props.id || props.held}
-          placeholder="对这一路说…"
+          placeholder="给这个会话发消息…"
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !blocked) {
               e.preventDefault();
@@ -87,7 +97,7 @@ export function Composer(props: {
             }
           }}
         />
-        <button className="primary" disabled={blocked} onClick={() => void send()}>
+        <button className="send" disabled={blocked} onClick={() => void send()}>
           {busy ? "…" : "发送"}
         </button>
       </div>

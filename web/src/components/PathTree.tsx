@@ -23,6 +23,11 @@ function sessLabel(s: SessionRow): string {
   return s.title || s.name || s.id.slice(0, 8);
 }
 
+function cwdLabel(cwd: string): string {
+  const parts = cwd.split("/").filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : cwd;
+}
+
 export function PathTree(props: {
   depot: DepotState;
   sessionsByServer: Record<string, SessionRow[]>;
@@ -45,12 +50,13 @@ export function PathTree(props: {
   const [openSrv, setOpenSrv] = useState<Record<string, boolean>>({});
   const [openCwd, setOpenCwd] = useState<Record<string, boolean>>({});
   const [startFor, setStartFor] = useState<string | null>(null);
+  const [pinFor, setPinFor] = useState<string | null>(null);
 
   if (props.collapsed) {
     return (
-      <aside className="depot">
+      <aside className="rail">
         <div className="collapsed-rail">
-          <button className="ghost" aria-label="展开车场" onClick={props.onToggleCollapsed}>
+          <button className="ghost" aria-label="展开侧栏" onClick={props.onToggleCollapsed}>
             »
           </button>
           {props.depot.servers.map((s) => (
@@ -61,7 +67,7 @@ export function PathTree(props: {
               aria-label={s.label}
               onClick={() => props.onSelectServer(s.id)}
             >
-              <span className={`lamp ${props.live[s.id] ? "live" : ""}`} />
+              <span className={`dot ${props.live[s.id] ? "live" : ""}`} />
             </button>
           ))}
         </div>
@@ -70,49 +76,67 @@ export function PathTree(props: {
   }
 
   return (
-    <aside className="depot">
-      <div className="depot-head">
-        <span className="depot-mark" aria-hidden />
-        <h1 className="depot-title">车场</h1>
-        <button className="ghost" aria-label="收起车场" onClick={props.onToggleCollapsed}>
+    <aside className="rail">
+      <div className="rail-head">
+        <h1 className="rail-title">会话</h1>
+        <button className="ghost" aria-label="收起侧栏" onClick={props.onToggleCollapsed}>
           «
         </button>
       </div>
-      <div className="depot-tree">
-        {props.depot.servers.length === 0 ? <div className="tiny">还没有机。先挂一台。</div> : null}
+      <div className="rail-tree">
+        {props.depot.servers.length === 0 ? (
+          <div className="tiny">还没有服务器，先添加一台。</div>
+        ) : null}
         {props.depot.servers.map((srv) => {
           const open = openSrv[srv.id] !== false;
           const sessions = props.sessionsByServer[srv.id] || [];
           const cwds = groupByCwd(sessions, props.depot.pinnedCwds[srv.id] || []);
           const live = Boolean(props.live[srv.id]);
+          const srvOn = props.selected.serverId === srv.id && !props.selected.sessionId && !props.selected.cwd;
           return (
             <div key={srv.id}>
-              <button
-                type="button"
-                className={`tag ${props.selected.serverId === srv.id && !props.selected.sessionId ? "on" : ""}`}
-                onClick={() => {
-                  setOpenSrv((m) => ({ ...m, [srv.id]: !open }));
-                  props.onSelectServer(srv.id);
-                }}
-              >
-                <div className="row2">
-                  <span className={`lamp ${live ? "live" : "halt"}`} />
-                  <span className="name">{open ? "▾" : "▸"} {srv.label || srv.host}</span>
+              <div className={`trow ${srvOn ? "on" : ""}`}>
+                <button
+                  type="button"
+                  className="trow-main"
+                  onClick={() => {
+                    setOpenSrv((m) => ({ ...m, [srv.id]: !open }));
+                    props.onSelectServer(srv.id);
+                  }}
+                >
+                  <span className="chev">{open ? "▾" : "▸"}</span>
+                  <span className={`dot ${live ? "live" : "halt"}`} />
+                  <span className="trow-name">{srv.label || srv.host}</span>
+                  <span className="trow-id">
+                    {srv.host}:{srv.port} {live ? "已连接" : "未连接"}
+                  </span>
+                </button>
+                <div className="trow-acts">
+                  <button
+                    type="button"
+                    title="编辑服务器"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditId(editId === srv.id ? null : srv.id);
+                    }}
+                  >
+                    编辑
+                  </button>
+                  <button
+                    type="button"
+                    className="danger"
+                    title="移除服务器"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      props.onDropServer(srv.id);
+                    }}
+                  >
+                    移除
+                  </button>
                 </div>
-                <div className="meta">
-                  {srv.host}:{srv.port} {live ? "在线" : "离线"}
-                </div>
-              </button>
+              </div>
               {open ? (
-                <div className="kids">
-                  <div className="actions">
-                    <button type="button" className="ghost" onClick={() => setEditId(editId === srv.id ? null : srv.id)}>
-                      改机
-                    </button>
-                    <button type="button" className="deny" onClick={() => props.onDropServer(srv.id)}>
-                      卸机
-                    </button>
-                  </div>
+                <>
                   {editId === srv.id ? (
                     <ServerFields
                       initial={srv}
@@ -127,59 +151,75 @@ export function PathTree(props: {
                     const ck = `${srv.id}|${cwd}`;
                     const cOpen = openCwd[ck] !== false;
                     const here = sessions.filter((s) => (s.cwd || "") === cwd);
+                    const cwdOn =
+                      props.selected.cwd === cwd &&
+                      props.selected.serverId === srv.id &&
+                      !props.selected.sessionId;
                     return (
-                      <div key={ck} className="indent">
-                        <button
-                          type="button"
-                          className={`tag ${props.selected.cwd === cwd && props.selected.serverId === srv.id && !props.selected.sessionId ? "on" : ""}`}
-                          onClick={() => {
-                            setOpenCwd((m) => ({ ...m, [ck]: !cOpen }));
-                            props.onSelectCwd(srv.id, cwd);
-                          }}
-                        >
-                          <div className="name">{cOpen ? "▾" : "▸"} 目录</div>
-                          <div className="meta">{cwd}</div>
-                        </button>
+                      <div key={ck}>
+                        <div className={`trow indent-1 ${cwdOn ? "on" : ""}`}>
+                          <button
+                            type="button"
+                            className="trow-main"
+                            title={cwd}
+                            onClick={() => {
+                              setOpenCwd((m) => ({ ...m, [ck]: !cOpen }));
+                              props.onSelectCwd(srv.id, cwd);
+                            }}
+                          >
+                            <span className="chev">{cOpen ? "▾" : "▸"}</span>
+                            <span className="trow-name path">{cwdLabel(cwd)}</span>
+                            <span className="trow-id">{cwd}</span>
+                          </button>
+                          <div className="trow-acts">
+                            <button
+                              type="button"
+                              title="新建会话"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setStartFor(startFor === ck ? null : ck);
+                              }}
+                            >
+                              新建
+                            </button>
+                          </div>
+                        </div>
                         {cOpen ? (
-                          <div className="kids">
+                          <>
                             {here.map((s) => {
                               const pending = s.pending?.length ?? 0;
+                              const on = props.selected.sessionId === s.id;
                               return (
-                                <div key={s.id} className="indent-2">
+                                <div key={s.id} className={`trow indent-2 ${on ? "on" : ""}`}>
                                   <button
                                     type="button"
-                                    className={`tag ${props.selected.sessionId === s.id ? "on" : ""}`}
+                                    className="trow-main"
                                     onClick={() => props.onSelectSession(srv.id, s.cwd, s.id)}
                                   >
-                                    <div className="row2">
-                                      <span className={`lamp ${s.alive ? "live" : "halt"} ${pending ? "warn" : ""}`} />
-                                      <span className="name">{sessLabel(s)}</span>
-                                      {props.badges[s.id] && props.selected.sessionId !== s.id ? (
-                                        <span className="badge" />
-                                      ) : null}
-                                    </div>
-                                    <div className="meta">
-                                      {s.alive ? "活着" : "已停"}
-                                      {s.lock ? ` · 锁 ${s.lock}` : ""}
-                                      {pending ? ` · 待决 ${pending}` : ""}
-                                      <div>{s.id}</div>
-                                    </div>
+                                    <span className="chev" />
+                                    <span className={`dot ${s.alive ? "live" : "halt"} ${pending ? "warn" : ""}`} />
+                                    <span className="trow-name">{sessLabel(s)}</span>
+                                    {props.badges[s.id] && props.selected.sessionId !== s.id ? (
+                                      <span className="badge" />
+                                    ) : null}
+                                    <span className="trow-id">{s.id}</span>
                                   </button>
-                                  <div className="actions">
-                                    <button type="button" className="deny" onClick={() => void props.onStop(srv.id, s.id)}>
-                                      停掉
+                                  <div className="trow-acts">
+                                    <button
+                                      type="button"
+                                      className="danger"
+                                      title="停止会话"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        void props.onStop(srv.id, s.id);
+                                      }}
+                                    >
+                                      停止
                                     </button>
                                   </div>
                                 </div>
                               );
                             })}
-                            <button
-                              type="button"
-                              className="ghost"
-                              onClick={() => setStartFor(startFor === ck ? null : ck)}
-                            >
-                              + 会话
-                            </button>
                             {startFor === ck ? (
                               <StartFields
                                 cwd={cwd}
@@ -187,23 +227,36 @@ export function PathTree(props: {
                                   await props.onStart(srv.id, cwd, prompt, name);
                                   setStartFor(null);
                                 }}
+                                onCancel={() => setStartFor(null)}
                               />
                             ) : null}
-                          </div>
+                          </>
                         ) : null}
                       </div>
                     );
                   })}
-                  <PinCwd onPin={(cwd) => props.onPinCwd(srv.id, cwd)} />
-                </div>
+                  <div className={`trow indent-1`}>
+                    <button
+                      type="button"
+                      className="trow-main"
+                      onClick={() => setPinFor(pinFor === srv.id ? null : srv.id)}
+                    >
+                      <span className="chev" />
+                      <span className="trow-name" style={{ color: "var(--mute)" }}>
+                        添加目录
+                      </span>
+                    </button>
+                  </div>
+                  {pinFor === srv.id ? <PinCwd onPin={(cwd) => props.onPinCwd(srv.id, cwd)} /> : null}
+                </>
               ) : null}
             </div>
           );
         })}
       </div>
-      <div className="depot-foot">
-        <button type="button" className="primary" onClick={() => setAddingSrv((v) => !v)}>
-          + 挂机
+      <div className="rail-foot">
+        <button type="button" className="quiet-add" onClick={() => setAddingSrv((v) => !v)}>
+          添加服务器
         </button>
         {addingSrv ? (
           <ServerFields
@@ -240,7 +293,7 @@ function ServerFields(props: {
         props.onSave({ id, label: label || host, host, port: p, token });
       }}
     >
-      <label htmlFor="srv-label">名牌</label>
+      <label htmlFor="srv-label">名称</label>
       <input id="srv-label" value={label} onChange={(e) => setLabel(e.target.value)} />
       <label htmlFor="srv-host">主机</label>
       <input id="srv-host" value={host} onChange={(e) => setHost(e.target.value)} />
@@ -257,7 +310,7 @@ function ServerFields(props: {
       />
       <div className="actions">
         <button type="submit" className="primary">
-          {props.initial ? "保存并接通" : "挂上并接通"}
+          {props.initial ? "保存并连接" : "添加并连接"}
         </button>
         <button type="button" className="ghost" onClick={props.onCancel}>
           取消
@@ -267,7 +320,11 @@ function ServerFields(props: {
   );
 }
 
-function StartFields(props: { cwd: string; onStart: (prompt: string, name: string) => Promise<void> }) {
+function StartFields(props: {
+  cwd: string;
+  onStart: (prompt: string, name: string) => Promise<void>;
+  onCancel: () => void;
+}) {
   const [prompt, setPrompt] = useState("");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -286,14 +343,19 @@ function StartFields(props: { cwd: string; onStart: (prompt: string, name: strin
           .finally(() => setBusy(false));
       }}
     >
-      <div className="tiny">{props.cwd}</div>
-      <label htmlFor="st-name">会话名</label>
+      <div className="tiny" style={{ padding: 0 }}>
+        {props.cwd}
+      </div>
+      <label htmlFor="st-name">名称</label>
       <input id="st-name" value={name} onChange={(e) => setName(e.target.value)} />
-      <label htmlFor="st-prompt">第一句</label>
+      <label htmlFor="st-prompt">初始消息</label>
       <textarea id="st-prompt" rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} required />
       <div className="actions">
         <button type="submit" className="primary" disabled={busy || !prompt}>
-          {busy ? "…" : "开会话"}
+          {busy ? "…" : "新建会话"}
+        </button>
+        <button type="button" className="ghost" onClick={props.onCancel}>
+          取消
         </button>
       </div>
       {err ? <div className="err">{err}</div> : null}
@@ -311,11 +373,11 @@ function PinCwd(props: { onPin: (cwd: string) => void }) {
         if (cwd.startsWith("/")) props.onPin(cwd);
       }}
     >
-      <label htmlFor="pin-cwd">钉住目录</label>
+      <label htmlFor="pin-cwd">目录</label>
       <div className="row">
         <input id="pin-cwd" className="grow" value={cwd} onChange={(e) => setCwd(e.target.value)} />
         <button type="submit" className="ghost">
-          钉住
+          添加
         </button>
       </div>
     </form>

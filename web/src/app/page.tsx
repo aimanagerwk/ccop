@@ -87,7 +87,7 @@ export default function Page() {
         port: s.port,
         token: s.token,
       });
-      if (!res.ok) return String(res.error || "接通失败");
+      if (!res.ok) return String(res.error || "连接失败");
       setLive((m) => ({ ...m, [s.id]: true }));
       await refreshOne(s.id);
       return "";
@@ -213,7 +213,7 @@ export default function Page() {
             { cwd, prompt, name: name || undefined, permission_mode: "auto" },
             serverId,
           );
-          if (!res.ok) throw new Error(String(res.error || "开会话失败"));
+          if (!res.ok) throw new Error(String(res.error || "新建会话失败"));
           await refreshOne(serverId);
           onSelectSession(serverId, cwd, String(res.id));
         }}
@@ -239,10 +239,8 @@ export default function Page() {
               onDone={() => void refreshAll()}
             />
           </>
-        ) : (
-          <div className="pathcrumb">选一台机、一个目录、一路会话</div>
-        )}
-        {current ? <Transcript events={events} /> : <div className="desk-empty">调度台空着</div>}
+        ) : null}
+        {current ? <Transcript events={events} /> : <div className="empty">选择一个会话</div>}
         <Composer
           id={sel.sessionId}
           serverId={sel.serverId}

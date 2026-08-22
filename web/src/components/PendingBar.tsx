@@ -21,7 +21,7 @@ export function PendingBar(props: {
       {props.pending.map((p) => (
         <div key={p.tool_use_id} className="row" style={{ marginBottom: 6 }}>
           <div className="grow">
-            待决 {p.tool || "?"} {p.reason ? `（${p.reason}）` : ""} {p.tool_use_id}
+            等待批准 {p.tool || "?"} {p.reason ? `（${p.reason}）` : ""}
           </div>
           <button className="ok" onClick={() => void act("approve", p.tool_use_id)}>
             批准

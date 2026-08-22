@@ -8,7 +8,7 @@ export function Toasts(props: { items: ToastItem[]; onDismiss: (key: string) => 
     <div className="toasts">
       {props.items.map((t) => (
         <div key={t.key} className="toast">
-          <button type="button" aria-label="关掉" onClick={() => props.onDismiss(t.key)}>
+          <button type="button" aria-label="关闭" onClick={() => props.onDismiss(t.key)}>
             ×
           </button>
           <div>
