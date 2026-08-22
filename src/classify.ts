@@ -121,6 +121,8 @@ export function fromHook(hookEventName: string, payload?: Record<string, unknown
   const extra: Record<string, unknown> = { hook: name };
   if ("tool_name" in p) extra.tool_name = p.tool_name;
   if ("tool_use_id" in p) extra.tool_use_id = p.tool_use_id;
+  if ("agent_id" in p || "agentId" in p) extra.agent_id = p.agent_id ?? p.agentId;
+  if ("agent_type" in p || "agentType" in p) extra.agent_type = p.agent_type ?? p.agentType;
   if (name === "PermissionRequest") {
     return fromPermissionRequest({
       tool_name: String(p.tool_name || ""),

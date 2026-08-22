@@ -1,0 +1,219 @@
+{
+  "sessions": {
+    "a": "cee5cd27-209d-496e-9835-075e8d317b5f",
+    "b": "6da9c30c-a520-4d0e-ada7-75cb34e38cfc"
+  },
+  "cwd": "/workspace/next-login",
+  "inventory_source": "sdk.d.ts + ccop host RPCs",
+  "counts": {
+    "ok": 25,
+    "policy-skip": 1,
+    "fail": 2,
+    "unsupported": 1
+  },
+  "rows": [
+    {
+      "id": 1,
+      "feature": "enableWorkflows=true (hardcoded)",
+      "attempted": true,
+      "evidence": "cee5cd27-209d-496e-9835-075e8d317b5f info.enable_workflows=true; Workflow tool fired tool_use_id=call-7355f38b-a24e-4c11-81e3-fb50b8248049-0. Host start options always set enableWorkflows:true (daemon.ts).",
+      "result": "ok"
+    },
+    {
+      "id": 2,
+      "feature": "disableWorkflows",
+      "attempted": false,
+      "evidence": "Policy-skip: host hardcoded always-on. daemon.ts cmdStart common={ultracode:false, enableWorkflows:true, effort:'max'}; disableWorkflows is never set. settings.json has enableWorkflows true and no disableWorkflows key.",
+      "result": "policy-skip"
+    },
+    {
+      "id": 3,
+      "feature": "workflowSizeGuideline small",
+      "attempted": true,
+      "evidence": "Set ~/.claude/settings.json workflowSizeGuideline=small then started cee5cd27-209d-496e-9835-075e8d317b5f. First script meta name=auth-session-dashboard-review used 2 parallel agents + 1 synthesizer (3 agent() calls, <5). Live SubagentStart workflow-subagent count before stop=2 (a4b038649de76b741, ad7590958a54e1418). Restored settings after.",
+      "result": "ok"
+    },
+    {
+      "id": 4,
+      "feature": "workflowKeywordTriggerEnabled + keyword ultracode",
+      "attempted": true,
+      "evidence": "cee5cd27-209d-496e-9835-075e8d317b5f prompt began with 'ultracode:'. settings workflowKeywordTriggerEnabled=true. Event kind=working summary='tool Workflow' tool_use_id=call-7355f38b-a24e-4c11-81e3-fb50b8248049-0.",
+      "result": "ok"
+    },
+    {
+      "id": 5,
+      "feature": "ultracode boolean session flag",
+      "attempted": true,
+      "evidence": "Opted-out per user. Host start options pass ultracode:false (daemon.ts). settings.json ultracode=false. Start payload never includes ultracode:true.",
+      "result": "ok"
+    },
+    {
+      "id": 6,
+      "feature": "workflowKeywordTrigger without keyword (control)",
+      "attempted": true,
+      "evidence": "6da9c30c-a520-4d0e-ada7-75cb34e38cfc prompt had no word ultracode; asked to call Workflow anyway. Workflow still fired tool_use_id=call-81c1deae-08a8-4ffa-85dc-191ac309b496-0 task_id=wd3eoqk8l. Keyword trigger is sufficient but not required when the model is told to use the tool.",
+      "result": "ok"
+    },
+    {
+      "id": 7,
+      "feature": "Workflow tool call (name Workflow) + tool_use_id",
+      "attempted": true,
+      "evidence": "cee5cd27-209d-496e-9835-075e8d317b5f {\"kind\":\"working\",\"summary\":\"tool Workflow\",\"extra\":{\"tool\":\"Workflow\",\"tool_use_id\":\"call-7355f38b-a24e-4c11-81e3-fb50b8248049-0\"}}",
+      "result": "ok"
+    },
+    {
+      "id": 8,
+      "feature": "task_started with task_id",
+      "attempted": true,
+      "evidence": "cee5cd27-209d-496e-9835-075e8d317b5f {\"summary\":\"task_started\",\"extra\":{\"task_id\":\"wq80ltdqd\",\"tool_use_id\":\"call-7355f38b-a24e-4c11-81e3-fb50b8248049-0\",\"task_type\":\"local_workflow\"}}",
+      "result": "ok"
+    },
+    {
+      "id": 9,
+      "feature": "workflow_name / local_workflow / task_type",
+      "attempted": true,
+      "evidence": "cee5cd27-209d-496e-9835-075e8d317b5f task_started extra: task_type=local_workflow workflow_name=auth-session-dashboard-review. Second task: task_id=whsrtu0a3 workflow_name=dashboard-only-review. 6da9c30c-a520-4d0e-ada7-75cb34e38cfc workflow_name=login-page-review.",
+      "result": "ok"
+    },
+    {
+      "id": 10,
+      "feature": "workflow-subagent SubagentStart (count)",
+      "attempted": true,
+      "evidence": "cee5cd27-209d-496e-9835-075e8d317b5f 3 SubagentStart agent_type=workflow-subagent (a4b038649de76b741, ad7590958a54e1418, ab5ca444586b035f7). 6da9c30c-a520-4d0e-ada7-75cb34e38cfc 1 (a6377826949f1d6b2). subagents RPC 6da9c30c-a520-4d0e-ada7-75cb34e38cfc source=sdk ids=['a6377826949f1d6b2'].",
+      "result": "ok"
+    },
+    {
+      "id": 11,
+      "feature": "task_progress",
+      "attempted": true,
+      "evidence": "cee5cd27-209d-496e-9835-075e8d317b5f task_progress task_id=wq80ltdqd description='Review: review-auth-session' last_tool_name=review-auth-session. Many later frames on whsrtu0a3 with usage.tool_uses incrementing.",
+      "result": "ok"
+    },
+    {
+      "id": 12,
+      "feature": "task_updated",
+      "attempted": true,
+      "evidence": "cee5cd27-209d-496e-9835-075e8d317b5f task_updated extra={task_id:wq80ltdqd, patch:{status:'killed', end_time:1787403750285}} after live task-stop. 6da9c30c-a520-4d0e-ada7-75cb34e38cfc patch={status:'completed', end_time:1787403870719}.",
+      "result": "ok"
+    },
+    {
+      "id": 13,
+      "feature": "task_notification completed|failed|stopped",
+      "attempted": true,
+      "evidence": "cee5cd27-209d-496e-9835-075e8d317b5f kind=interrupted status=stopped task_id=wq80ltdqd tool_use_id=call-7355f38b-\u2026. 6da9c30c-a520-4d0e-ada7-75cb34e38cfc kind=task_done status=completed task_id=wd3eoqk8l usage={total_tokens:13828, tool_uses:3, duration_ms:15029}. No failed notification this run.",
+      "result": "ok"
+    },
+    {
+      "id": 14,
+      "feature": "background_tasks_changed",
+      "attempted": true,
+      "evidence": "cee5cd27-209d-496e-9835-075e8d317b5f extra={n:1, tasks:[{task_id:'wq80ltdqd', description:'Code-review Next.js auth, session, and dashboard paths'}]} then n:0. Repeated for second task whsrtu0a3.",
+      "result": "ok"
+    },
+    {
+      "id": 15,
+      "feature": "Background task type/name if tasks RPC exposes them",
+      "attempted": true,
+      "evidence": "tasks RPC rows are {task_id,status,summary,tool_use_id,usage} only \u2014 no type/name. background_tasks_changed live items also lacked type/name (SDK BackgroundTaskSummary fields). Observed keys: task_id, description.",
+      "result": "fail"
+    },
+    {
+      "id": 16,
+      "feature": "spawn_depth if present",
+      "attempted": true,
+      "evidence": "cee5cd27-209d-496e-9835-075e8d317b5f/6da9c30c-a520-4d0e-ada7-75cb34e38cfc task_started extras never included spawn_depth. Matches sdk.d.ts: spawn_depth is for local_agent, not set on other tasks (these were task_type=local_workflow).",
+      "result": "ok"
+    },
+    {
+      "id": 17,
+      "feature": "is_backgrounded field",
+      "attempted": true,
+      "evidence": "Never present on task_started/task_updated for local_workflow (sdk.d.ts: set for local_agent and local_bash). task-bg RPC returned backgrounded=false (see row 21).",
+      "result": "ok"
+    },
+    {
+      "id": 18,
+      "feature": "skip_transcript if present",
+      "attempted": true,
+      "evidence": "cee5cd27-209d-496e-9835-075e8d317b5f/6da9c30c-a520-4d0e-ada7-75cb34e38cfc skip_transcript absent on task_started and task_notification extras (including completed wd3eoqk8l).",
+      "result": "ok"
+    },
+    {
+      "id": 19,
+      "feature": "monitor: tasks, subagents, events --tail, info, workflows, status",
+      "attempted": true,
+      "evidence": "cee5cd27-209d-496e-9835-075e8d317b5f all six RPCs returned ok during run. info.enable_workflows=true effort=max. events --tail used throughout driver. status listed live session + pending Workflow.",
+      "result": "ok"
+    },
+    {
+      "id": 20,
+      "feature": "workflows RPC lists advertised skills/slash",
+      "attempted": true,
+      "evidence": "cee5cd27-209d-496e-9835-075e8d317b5f workflows.slash_commands includes __remote-workflow, workflow-launch-exec. skills include deep-research, code-review, run, \u2026 (no workflow-named skill).",
+      "result": "ok"
+    },
+    {
+      "id": 21,
+      "feature": "task-bg while running",
+      "attempted": true,
+      "evidence": "cee5cd27-209d-496e-9835-075e8d317b5f while wq80ltdqd status=running: task-bg -> {ok:true, backgrounded:false, tool_use_id:'call-7355f38b-a24e-4c11-81e3-fb50b8248049-0'}. No subsequent is_backgrounded patch.",
+      "result": "ok"
+    },
+    {
+      "id": 22,
+      "feature": "task-stop on a LIVE running workflow task",
+      "attempted": true,
+      "evidence": "cee5cd27-209d-496e-9835-075e8d317b5f task-stop wq80ltdqd while running -> {ok:true, task_id:'wq80ltdqd'}; tasks RPC status=stopped; task_updated patch.status=killed; task_notification status=stopped.",
+      "result": "ok"
+    },
+    {
+      "id": 23,
+      "feature": "pause \u2014 no pauseTask in SDK",
+      "attempted": true,
+      "evidence": "cee5cd27-209d-496e-9835-075e8d317b5f sent text 'pause' while task running. No paused status on session or tasks (paused=false, sess_state=working, task still running). No pauseTask on Query/client.",
+      "result": "unsupported"
+    },
+    {
+      "id": 24,
+      "feature": "continue/resume after stop or interrupt",
+      "attempted": true,
+      "evidence": "cee5cd27-209d-496e-9835-075e8d317b5f after stop, sent continue prompt to read prior journal and resume. Model started second Workflow dashboard-only-review (whsrtu0a3). Journals exist under \u2026/cee5cd27-209d-496e-9835-075e8d317b5f/workflows and \u2026/subagents/workflows/wf_255b0b71-05e.",
+      "result": "ok"
+    },
+    {
+      "id": 25,
+      "feature": "start a second workflow in same or new session",
+      "attempted": true,
+      "evidence": "Same session cee5cd27-209d-496e-9835-075e8d317b5f: second tool Workflow call-7c901579-b19c-4d30-9f76-b6caf54675f7-3 task_id=whsrtu0a3 workflow_name=dashboard-only-review. Also new session 6da9c30c-a520-4d0e-ada7-75cb34e38cfc started another workflow.",
+      "result": "ok"
+    },
+    {
+      "id": 26,
+      "feature": "usage/cost_usd/model_usage after workflow",
+      "attempted": true,
+      "evidence": "cee5cd27-209d-496e-9835-075e8d317b5f info.cost_usd=0.270088 model_usage.grok-4.6={inputTokens:46542,outputTokens:1490,cacheReadInputTokens:256,costUSD:0.270088}. 6da9c30c-a520-4d0e-ada7-75cb34e38cfc cost_usd=0.334524 after completed workflow (task usage total_tokens=13828 included in pipeline).",
+      "result": "ok"
+    },
+    {
+      "id": 27,
+      "feature": "stop session",
+      "attempted": true,
+      "evidence": "stop cee5cd27-209d-496e-9835-075e8d317b5f -> {ok:true,id:cee5cd27-209d-496e-9835-075e8d317b5f}; stop 6da9c30c-a520-4d0e-ada7-75cb34e38cfc -> {ok:true,id:6da9c30c-a520-4d0e-ada7-75cb34e38cfc}. status afterward: no live sessions. Daemon left up.",
+      "result": "ok"
+    },
+    {
+      "id": 28,
+      "feature": "slash that looks like workflow-launch",
+      "attempted": true,
+      "evidence": "cee5cd27-209d-496e-9835-075e8d317b5f workflows listed workflow-launch-exec; sent '/workflow-launch-exec'. turn_done result was prose about the already-running review ('Workflow is running: 2 review agents\u2026'), not a new launcher invocation. No extra Workflow tool_use from the slash itself.",
+      "result": "fail"
+    },
+    {
+      "id": 29,
+      "feature": "Journal files under ~/.claude/projects/*next-login*/**/workflows/",
+      "attempted": true,
+      "evidence": "Created: \u2026/cee5cd27-209d-496e-9835-075e8d317b5f/workflows/wf_255b0b71-05e.json, scripts/auth-session-dashboard-review-*.js, scripts/dashboard-only-review-*.js, subagents/workflows/wf_255b0b71-05e/journal.jsonl; \u2026/6da9c30c-a520-4d0e-ada7-75cb34e38cfc/workflows/wf_2fe81b4a-b94.json + scripts/login-page-review-*.js + journal.jsonl.",
+      "result": "ok"
+    }
+  ]
+}

@@ -116,3 +116,51 @@ export function decide(
   if (allow.has(name.toLowerCase())) return "allow";
   return "ask";
 }
+
+/** PreToolUse hook output — denials that resolve before canUseTool. */
+export type HookPermissionDecision = "allow" | "deny" | "ask" | "defer";
+
+export type PreToolUseHookDecision = {
+  hookSpecificOutput: {
+    hookEventName: "PreToolUse";
+    permissionDecision: HookPermissionDecision;
+    permissionDecisionReason: string;
+  };
+};
+
+/**
+ * Map (tool, input, lock, mode) → PreToolUse hook decision.
+ * Policy deny always returns hook deny (auto classifier may skip canUseTool).
+ * lock===operator must not auto-allow: ask so canUseTool can park; if the
+ * SDK would skip canUseTool, ask still blocks silent proceed.
+ * Empty object defers to canUseTool / classifier (in-project Write in auto).
+ */
+export function preToolUseHookDecision(
+  tool: string,
+  input: Record<string, unknown> | null | undefined,
+  lock: string | null | undefined,
+  mode: string,
+  policy?: Policy | null,
+): PreToolUseHookDecision | Record<string, never> {
+  void mode;
+  const decision = decide(tool, input, policy);
+  if (decision === "deny") {
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: `policy deny ${tool}`,
+      },
+    };
+  }
+  if (lock === "operator") {
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "ask",
+        permissionDecisionReason: "held",
+      },
+    };
+  }
+  return {};
+}

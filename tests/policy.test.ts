@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bashDenied, decide, loadPolicy } from "../src/policy.js";
+import { bashDenied, decide, loadPolicy, preToolUseHookDecision } from "../src/policy.js";
 
 describe("policy", () => {
   it("allow Read Grep Glob", () => {
@@ -42,5 +42,52 @@ describe("policy", () => {
   it("load policy file", () => {
     const pol = loadPolicy();
     expect(pol.allow).toContain("Read");
+  });
+});
+
+describe("preToolUseHookDecision", () => {
+  it("policy deny sudo is hook deny even in auto", () => {
+    const d = preToolUseHookDecision("Bash", { command: "sudo echo pwned" }, null, "auto");
+    expect(d.hookSpecificOutput?.hookEventName).toBe("PreToolUse");
+    expect(d.hookSpecificOutput?.permissionDecision).toBe("deny");
+    expect(d.hookSpecificOutput?.permissionDecisionReason).toMatch(/policy deny/);
+  });
+
+  it("policy deny rm -rf is hook deny", () => {
+    const d = preToolUseHookDecision("Bash", { command: "rm -rf /" }, null, "auto");
+    expect(d.hookSpecificOutput?.permissionDecision).toBe("deny");
+  });
+
+  it("hold does not auto-allow Read", () => {
+    const d = preToolUseHookDecision("Read", { file_path: "/workspace/hello-cc/hello.py" }, "operator", "auto");
+    expect(d.hookSpecificOutput?.permissionDecision).toBe("ask");
+    expect(d.hookSpecificOutput?.permissionDecisionReason).toBe("held");
+  });
+
+  it("hold parks allow-class tools in default too", () => {
+    const d = preToolUseHookDecision("Read", { file_path: "/tmp/x" }, "operator", "default");
+    expect(d.hookSpecificOutput?.permissionDecision).toBe("ask");
+  });
+
+  it("not held Read defers (empty) so canUseTool/classifier may allow", () => {
+    const d = preToolUseHookDecision("Read", { file_path: "/tmp/x" }, null, "auto");
+    expect(d).toEqual({});
+  });
+
+  it("not held in-project Write in auto defers — no host approve required", () => {
+    const d = preToolUseHookDecision("Write", { file_path: "/workspace/hello-cc/x.txt" }, null, "auto");
+    expect(d).toEqual({});
+  });
+
+  it("held Write is ask not silent allow", () => {
+    const d = preToolUseHookDecision("Write", { file_path: "/workspace/hello-cc/x.txt" }, "operator", "auto");
+    expect(d.hookSpecificOutput?.permissionDecision).toBe("ask");
+    expect(d.hookSpecificOutput?.permissionDecisionReason).toBe("held");
+  });
+
+  it("policy deny wins over hold", () => {
+    const d = preToolUseHookDecision("Bash", { command: "sudo true" }, "operator", "auto");
+    expect(d.hookSpecificOutput?.permissionDecision).toBe("deny");
+    expect(d.hookSpecificOutput?.permissionDecisionReason).toMatch(/policy deny/);
   });
 });

@@ -360,6 +360,22 @@ class Session {
     }
     void payload.session_id;
     void payload.sessionId;
+    if (evName === "PreToolUse") {
+      const tool = String(payload.tool_name || payload.toolName || "");
+      const raw = payload.tool_input ?? payload.toolInput ?? {};
+      const input =
+        raw && typeof raw === "object" && !Array.isArray(raw)
+          ? (raw as Record<string, unknown>)
+          : {};
+      const hookDecision = policyMod.preToolUseHookDecision(
+        tool,
+        input,
+        this.lock,
+        this.permissionMode,
+        this.policy,
+      );
+      if (hookDecision && Object.keys(hookDecision).length) return hookDecision;
+    }
     return {};
   }
 

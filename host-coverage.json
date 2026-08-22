@@ -1,0 +1,337 @@
+{
+  "cwd": "/workspace/hello-cc",
+  "sessions": {
+    "auto_default": "cfab4ab6-8878-4047-a9cf-b45f99138839",
+    "auto_retry": "e2002286-259c-4af7-9f0f-b978636df939",
+    "default_contrast": "56c2aab7-6807-4d55-b76f-675f88d73abb"
+  },
+  "product_default_permission_mode": "auto",
+  "counts": {
+    "ok": 41,
+    "fail": 3,
+    "skip": 1
+  },
+  "notes": [
+    "Not Claude MCP / plan / plugin coverage.",
+    "Start without --permission-mode -> auto. --permission-mode default is contrast only.",
+    "PERMISSION_TIMEOUT_S=3600 skipped.",
+    "Daemon left up. No git commit/push."
+  ],
+  "rows": [
+    {
+      "id": "unknown-cmd",
+      "feature": "unknown cmd error",
+      "attempted": true,
+      "evidence": "ok=false error=unknown cmd not-a-real-host-cmd",
+      "result": "ok"
+    },
+    {
+      "id": "down",
+      "feature": "down",
+      "attempted": true,
+      "evidence": "ok=true",
+      "result": "ok"
+    },
+    {
+      "id": "missing-daemon",
+      "feature": "missing daemon error",
+      "attempted": true,
+      "evidence": "ok=false daemon not reachable ENOENT ccop.sock",
+      "result": "ok"
+    },
+    {
+      "id": "up",
+      "feature": "up (restart after permissionMode default=auto)",
+      "attempted": true,
+      "evidence": "ok=true pid=93635 already=false",
+      "result": "ok"
+    },
+    {
+      "id": "status",
+      "feature": "status",
+      "attempted": true,
+      "evidence": "ok=true after up; sessions listed",
+      "result": "ok"
+    },
+    {
+      "id": "start-cwd-prompt",
+      "feature": "start --cwd --prompt",
+      "attempted": true,
+      "evidence": "cfab4ab6-8878-4047-a9cf-b45f99138839 start ok cwd=/workspace/hello-cc",
+      "result": "ok"
+    },
+    {
+      "id": "start-name",
+      "feature": "start --name",
+      "attempted": true,
+      "evidence": "name=host-cov on cfab4ab6",
+      "result": "ok"
+    },
+    {
+      "id": "auto-mode-start-flag",
+      "feature": "start without --permission-mode is auto (product default)",
+      "attempted": true,
+      "evidence": "cfab4ab6 permission_mode=auto; e2002286 retry also auto",
+      "result": "ok"
+    },
+    {
+      "id": "send",
+      "feature": "send",
+      "attempted": true,
+      "evidence": "cfab4ab6 send pong ok=true",
+      "result": "ok"
+    },
+    {
+      "id": "hold",
+      "feature": "hold",
+      "attempted": true,
+      "evidence": "ok=true id=cfab4ab6 lock=operator",
+      "result": "ok"
+    },
+    {
+      "id": "send-while-held",
+      "feature": "send-while-held expect held",
+      "attempted": true,
+      "evidence": "ok=false error=held",
+      "result": "ok"
+    },
+    {
+      "id": "hold-read-parks",
+      "feature": "hold then Read that would auto-allow parks reason=held (even in auto)",
+      "attempted": true,
+      "evidence": "e2002286: hold ts=1787405490 lock=operator then tool Read hello.py ts=1787405494 Pre+Post with NO needs_decision/pending. Auto did not park.",
+      "result": "fail"
+    },
+    {
+      "id": "release",
+      "feature": "release",
+      "attempted": true,
+      "evidence": "ok=true id=cfab4ab6 lock=null",
+      "result": "ok"
+    },
+    {
+      "id": "policy-allow-read",
+      "feature": "allow auto-pass Read/Grep/Glob without pending when not held",
+      "attempted": true,
+      "evidence": "e2002286 read_auto sawRead=true parked=false pendingRead=false; cfab4ab6 tool Read call-7e355e1c Pre+Post no needs_decision",
+      "result": "ok"
+    },
+    {
+      "id": "release-then-read-auto",
+      "feature": "release then Read auto-allows again",
+      "attempted": true,
+      "evidence": "e2002286 after release: second Read call-f67edac6 no park",
+      "result": "ok"
+    },
+    {
+      "id": "auto-allows-write-no-approve",
+      "feature": "auto (product default) allows in-project Write without host approve",
+      "attempted": true,
+      "evidence": "cfab4ab6 wrote /workspace/hello-cc/auto-mode-probe.txt body=auto-ok; tool Write call-80ff120f; sawWritePend=false",
+      "result": "ok"
+    },
+    {
+      "id": "policy-deny-dangerous",
+      "feature": "deny by policy: sudo \u2014 PermissionResultDeny / no host approve",
+      "attempted": true,
+      "evidence": "e2002286 Bash sudo echo pwned call-fc7e3f9c; NO park; turn_done The command ran. Output: pwned. Policy deny did not stop auto execution.",
+      "result": "fail"
+    },
+    {
+      "id": "auto-policy-deny-still-blocks",
+      "feature": "auto + policy deny still blocks",
+      "attempted": true,
+      "evidence": "Same sudo turn executed. Host canUseTool deny-first did not win under permissionMode auto.",
+      "result": "fail"
+    },
+    {
+      "id": "ask-user-question",
+      "feature": "AskUserQuestion needs_info + needs_decision (auto: may not park pending)",
+      "attempted": true,
+      "evidence": "cfab4ab6 call-d2f879fc needs_info + needs_decision + PermissionRequest + PostToolUse (no status.pending). 2 options red/blue.",
+      "result": "ok"
+    },
+    {
+      "id": "interrupt",
+      "feature": "interrupt",
+      "attempted": true,
+      "evidence": "ok=true id=cfab4ab6; events kind=interrupted then turn_done is_error",
+      "result": "ok"
+    },
+    {
+      "id": "events",
+      "feature": "events",
+      "attempted": true,
+      "evidence": "cfab4ab6 events ok n>=27",
+      "result": "ok"
+    },
+    {
+      "id": "events-tail",
+      "feature": "events --tail",
+      "attempted": true,
+      "evidence": "ok=true n=4 (<=5)",
+      "result": "ok"
+    },
+    {
+      "id": "events-truth",
+      "feature": "needs_decision vs turn_done vs task_done not confused",
+      "attempted": true,
+      "evidence": "cfab4ab6 last_turn.kind=turn_done last_task=null has_needs_decision=true has_task_done=false",
+      "result": "ok"
+    },
+    {
+      "id": "info",
+      "feature": "info",
+      "attempted": true,
+      "evidence": "ok=true effort=max permission_mode=auto",
+      "result": "ok"
+    },
+    {
+      "id": "workflows",
+      "feature": "workflows",
+      "attempted": true,
+      "evidence": "ok=true nSkills=14 advertise only; host does not invoke",
+      "result": "ok"
+    },
+    {
+      "id": "tasks",
+      "feature": "tasks",
+      "attempted": true,
+      "evidence": "ok=true n=0",
+      "result": "ok"
+    },
+    {
+      "id": "task-stop",
+      "feature": "task-stop",
+      "attempted": true,
+      "evidence": "ok=true task_id=no-such-task",
+      "result": "ok"
+    },
+    {
+      "id": "task-bg",
+      "feature": "task-bg",
+      "attempted": true,
+      "evidence": "ok=true backgrounded=true tool_use_id=null",
+      "result": "ok"
+    },
+    {
+      "id": "subagents",
+      "feature": "subagents",
+      "attempted": true,
+      "evidence": "ok=true source=sdk",
+      "result": "ok"
+    },
+    {
+      "id": "approve-unknown",
+      "feature": "approve unknown tool_use_id",
+      "attempted": true,
+      "evidence": "ok=false error=no pending toolu_does_not_exist",
+      "result": "ok"
+    },
+    {
+      "id": "deny-unknown",
+      "feature": "deny unknown tool_use_id",
+      "attempted": true,
+      "evidence": "ok=false error=no pending toolu_does_not_exist",
+      "result": "ok"
+    },
+    {
+      "id": "permission-timeout",
+      "feature": "permission timeout (PERMISSION_TIMEOUT_S=3600)",
+      "attempted": false,
+      "evidence": "PERMISSION_TIMEOUT_S is 3600s; suite does not stall",
+      "result": "skip"
+    },
+    {
+      "id": "duplicate-live-start",
+      "feature": "duplicate live start same id",
+      "attempted": true,
+      "evidence": "ok=false error=session cfab4ab6 already live",
+      "result": "ok"
+    },
+    {
+      "id": "stop",
+      "feature": "stop",
+      "attempted": true,
+      "evidence": "ok=true id=cfab4ab6",
+      "result": "ok"
+    },
+    {
+      "id": "start-resume-id",
+      "feature": "start --resume-id (resume a stopped session)",
+      "attempted": true,
+      "evidence": "resume cfab4ab6 ok name=host-cov-resume permission_mode=auto",
+      "result": "ok"
+    },
+    {
+      "id": "permission-mode-default-contrast",
+      "feature": "start --permission-mode default (contrast only)",
+      "attempted": true,
+      "evidence": "56c2aab7-6807-4d55-b76f-675f88d73abb permission_mode=default",
+      "result": "ok"
+    },
+    {
+      "id": "policy-ask-write",
+      "feature": "ask parks Write/Edit/Bash under --permission-mode default",
+      "attempted": true,
+      "evidence": "56c2aab7 pending Write reason=ask call-5ef26622; events needs_decision parked Write",
+      "result": "ok"
+    },
+    {
+      "id": "pending-shape",
+      "feature": "pending list shows tool, tool_use_id, reason (ask vs held)",
+      "attempted": true,
+      "evidence": "tool=Write tool_use_id=call-5ef26622 reason=ask",
+      "result": "ok"
+    },
+    {
+      "id": "default-mode-parks-write",
+      "feature": "default mode still parks Write (contrast vs auto)",
+      "attempted": true,
+      "evidence": "same parked Write reason=ask on 56c2aab7",
+      "result": "ok"
+    },
+    {
+      "id": "approve",
+      "feature": "approve",
+      "attempted": true,
+      "evidence": "ok=true id=56c2aab7 tool_use_id=call-5ef26622 allowed=true",
+      "result": "ok"
+    },
+    {
+      "id": "approve-write-proceeds",
+      "feature": "approve parked in-project Write \u2014 tool proceeds",
+      "attempted": true,
+      "evidence": "exists /workspace/hello-cc/host-cov-ok.txt after approve",
+      "result": "ok"
+    },
+    {
+      "id": "deny",
+      "feature": "deny",
+      "attempted": true,
+      "evidence": "ok=true id=56c2aab7 tool_use_id=call-47e63c3c allowed=false",
+      "result": "ok"
+    },
+    {
+      "id": "deny-write-blocked",
+      "feature": "deny parked out-of-project Write \u2014 file does not happen",
+      "attempted": true,
+      "evidence": "/tmp/ccop-host-cov-probe.txt exists=false; model said write denied",
+      "result": "ok"
+    },
+    {
+      "id": "ask-user-question-default",
+      "feature": "AskUserQuestion parks under default; deny tool_use_id",
+      "attempted": true,
+      "evidence": "56c2aab7 pending AskUserQuestion reason=ask call-83304e4d; needs_info + needs_decision. Denied then stop.",
+      "result": "ok"
+    },
+    {
+      "id": "daemon-up-end",
+      "feature": "daemon left up",
+      "attempted": true,
+      "evidence": "status ok=true after suite",
+      "result": "ok"
+    }
+  ]
+}
