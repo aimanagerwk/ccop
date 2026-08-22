@@ -74,6 +74,8 @@ sequenceDiagram
 
 统一：成功/失败都是一行 JSON。ok:false 时退出码 1。
 
+远程 WS（`CCOP_TOKEN` 才听）：协议见 [WS.md](./WS.md)。
+
 在 /workspace/ccop 跑 `npx tsx src/cli.ts <cmd>`（等价 `npm start -- <cmd>`；`npm run up` 只拉 daemon）。ID 是 Claude session UUID。
 
 - `up` — 拉起 daemon。已在跑则 {already:true}。
@@ -88,6 +90,7 @@ sequenceDiagram
 - `deny ID tool_use_id` — 拒绝一条 parked 工具。
 - `status` — 列出全部会话：活/死、lock、pending、用量、skills。
 - `events ID [--tail N]` — 读这条会话的分类事件，可 tail。
+- `wait ID [--kind a,b] [--timeout SEC]` — 阻塞直到**之后**出现 wake kind（默认 `needs_decision,needs_info,turn_done,failed,dead`）。已死立刻 `{ok:true,woke:"dead"}`；已有 pending 且 kinds 含 `needs_decision` 立刻返回 pending。超时 `{ok:false,error:"wait timeout"}` 退出 1。当前 daemon 若无 wait RPC，CLI 每 ~400ms poll `events`/`status`。
 - `info ID` — 单会话快照：effort、workflow、用量、skills、plugins，便宜时带 mcp_servers。
 - `workflows ID` — 列出 session 广告过的 skills / slash / plugins。host 不 invoke。
 - `tasks ID` — 列出 SDK 任务。
@@ -171,6 +174,13 @@ cost_usd 是 SDK 估算（ResultMessage.total_cost_usd，流式 query() 取最�
 例 events：
 
     {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "events": [{"ts": 1770000000.1, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "name": "smoke", "kind": "sent", "summary": "...", "extra": {}}, {"kind": "needs_decision", "summary": "can_use_tool parked Write"}, {"kind": "turn_done", "summary": "result message (turn, not task)"}]}
+
+例 wait（只认 ts 大于 wait 开始时最新事件的未来事件；session 已死 / 不 live：立刻 woke=dead）：
+
+    {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "woke": "turn_done", "event": {"ts": 1770000001.0, "kind": "turn_done", "summary": "result message (turn, not task)", "extra": {}}}
+    {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "woke": "needs_decision", "event": {"kind": "needs_decision"}, "pending": [{"tool_use_id": "toolu_...", "tool": "Write", "reason": "ask"}]}
+    {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "woke": "dead", "event": {"kind": "dead", "summary": "session not live"}}
+    {"ok": false, "error": "wait timeout"}
 
 daemon 不可达：
 

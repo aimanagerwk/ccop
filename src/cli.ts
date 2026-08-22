@@ -7,6 +7,18 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { LOG_PATH, PID_PATH, ROOT, SOCK_PATH, ensureData } from "./paths.js";
 import { parseArgs } from "./parse.js";
+import {
+  WAIT_POLL_MS,
+  isUnknownWaitCmd,
+  matchWaitPoll,
+  matchWaitStart,
+  newestEventTs,
+  parseWaitKinds,
+  parseWaitTimeout,
+  waitOk,
+  type PendingTool,
+  type WaitSnap,
+} from "./wait.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -43,10 +55,27 @@ function resolveTsx(): string {
   }
 }
 
+async function pingDaemon(): Promise<Record<string, unknown> | null> {
+  try {
+    const { sendReq } = await import("./ipc.js");
+    return await sendReq({ cmd: "ping" }, 2);
+  } catch {
+    return null;
+  }
+}
+
+function wsFromPing(p: Record<string, unknown> | null): { ws?: unknown } {
+  if (p && p.ws) return { ws: p.ws };
+  return {};
+}
+
 async function cmdUp(): Promise<void> {
   ensureData();
   const pid = await daemonAlive();
-  if (pid !== null) out({ ok: true, pid, already: true });
+  if (pid !== null) {
+    const extra = wsFromPing(await pingDaemon());
+    out({ ok: true, pid, already: true, ...extra });
+  }
   const logFd = openSync(LOG_PATH, "a");
   const cli = join(here, "cli.ts");
   const tsx = resolveTsx();
@@ -60,7 +89,10 @@ async function cmdUp(): Promise<void> {
   proc.unref();
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
-    if ((await daemonAlive()) !== null) out({ ok: true, pid: proc.pid, already: false });
+    if ((await daemonAlive()) !== null) {
+      const extra = wsFromPing(await pingDaemon());
+      out({ ok: true, pid: proc.pid, already: false, ...extra });
+    }
     try {
       process.kill(proc.pid!, 0);
     } catch {
@@ -202,7 +234,76 @@ export async function main(argv?: string[]): Promise<void> {
   }
   if (cmd === "plugins-reload") return rpc({ cmd: "plugins-reload", id: args.id }, 120);
   if (cmd === "skills-reload") return rpc({ cmd: "skills-reload", id: args.id }, 120);
+  if (cmd === "wait") return cmdWaitCli(args);
   out({ ok: false, error: `unknown cmd ${cmd}` }, 1);
+}
+
+async function fetchWaitSnap(id: unknown): Promise<{ ok: true; id: string; snap: WaitSnap } | { ok: false; error: string }> {
+  const { sendReq } = await import("./ipc.js");
+  const evRes = await sendReq({ cmd: "events", id }, 30);
+  if (!evRes.ok) return { ok: false, error: String(evRes.error || "events failed") };
+  const resolvedId = String(evRes.id || id);
+  const events = Array.isArray(evRes.events) ? (evRes.events as Record<string, unknown>[]) : [];
+  let pending: PendingTool[] = [];
+  let alive = false;
+  try {
+    const st = await sendReq({ cmd: "status" }, 30);
+    if (st.ok && Array.isArray(st.sessions)) {
+      const row = (st.sessions as Record<string, unknown>[]).find((s) => String(s.id) === resolvedId);
+      if (row) {
+        alive = Boolean(row.alive);
+        pending = Array.isArray(row.pending) ? (row.pending as PendingTool[]) : [];
+      }
+    }
+  } catch {
+    /* status optional; events already resolved the id */
+  }
+  try {
+    const info = await sendReq({ cmd: "info", id: resolvedId }, 30);
+    if (info.ok) {
+      if (typeof info.alive === "boolean") alive = info.alive;
+      if (Array.isArray(info.pending)) pending = info.pending as PendingTool[];
+    }
+  } catch {
+    /* info may omit pending/alive */
+  }
+  return { ok: true, id: resolvedId, snap: { events, pending, alive, found: true } };
+}
+
+async function pollWait(id: unknown, kinds: string[], timeoutSec: number): Promise<void> {
+  const deadline = Date.now() + timeoutSec * 1000;
+  let fetched = await fetchWaitSnap(id);
+  if (!fetched.ok) out({ ok: false, error: fetched.error }, 1);
+  const start = matchWaitStart(fetched.snap, kinds);
+  if (start.hit) out(waitOk(fetched.id, start));
+  const afterTs = newestEventTs(fetched.snap.events);
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, WAIT_POLL_MS));
+    fetched = await fetchWaitSnap(id);
+    if (!fetched.ok) out({ ok: false, error: fetched.error }, 1);
+    const hit = matchWaitPoll(fetched.snap, kinds, afterTs);
+    if (hit.hit) out(waitOk(fetched.id, hit));
+  }
+  out({ ok: false, error: "wait timeout" }, 1);
+}
+
+async function cmdWaitCli(args: Record<string, unknown>): Promise<void> {
+  const parsed = parseWaitKinds(args.kind);
+  if (!parsed.ok) out({ ok: false, error: parsed.error }, 1);
+  const timeoutSec = parseWaitTimeout(args.timeout);
+  const { sendReq } = await import("./ipc.js");
+  try {
+    const res = await sendReq(
+      { cmd: "wait", id: args.id, kinds: parsed.kinds, timeout: timeoutSec },
+      timeoutSec + 10,
+    );
+    if (isUnknownWaitCmd(res)) return pollWait(args.id, parsed.kinds, timeoutSec);
+    out(res, res.ok ? 0 : 1);
+  } catch (exc: any) {
+    const msg = String(exc?.message || exc);
+    if (/unknown cmd/i.test(msg)) return pollWait(args.id, parsed.kinds, timeoutSec);
+    out({ ok: false, error: `daemon not reachable: ${exc}` }, 1);
+  }
 }
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];

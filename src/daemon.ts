@@ -19,6 +19,16 @@ import {
   usageStatusFields,
   type SessionUsage,
 } from "./usage.js";
+import { readWsEnv, startWsServer, type EventCb } from "./ws.js";
+import {
+  matchWaitEvents,
+  matchWaitStart,
+  newestEventTs,
+  parseWaitKinds,
+  parseWaitTimeout,
+  waitOk,
+  type PendingTool,
+} from "./wait.js";
 
 export const HOOK_EVENTS = [
   "PreToolUse",
@@ -255,10 +265,13 @@ class Session {
   /** SDK permissionMode. Hardcoded default is auto (classifier). Hold still parks. Policy deny still wins. */
   permissionMode = "auto";
 
-  constructor(id: string, cwd: string, name = "") {
+  owner: Host | null = null;
+
+  constructor(id: string, cwd: string, name = "", owner: Host | null = null) {
     this.id = id;
     this.cwd = cwd;
     this.name = name;
+    this.owner = owner;
   }
 
   get sdkSessionId(): string {
@@ -309,7 +322,10 @@ class Session {
   }
 
   emit(events: classify.Event[]): void {
-    for (const e of events) appendEvent(this.id, e.kind, e.summary, e.extra || {}, this.name);
+    for (const e of events) {
+      const rec = appendEvent(this.id, e.kind, e.summary, e.extra || {}, this.name);
+      this.owner?.emitEvent(this.id, rec);
+    }
   }
 
   async canUseTool(toolName: string, toolInput: Record<string, unknown>, ctx: any): Promise<unknown> {
@@ -611,9 +627,28 @@ function sleepReject(ms: number, message: string): Promise<never> {
   });
 }
 
-class Host {
+export class Host {
   sessions: Record<string, Session> = {};
   shuttingDown = false;
+  wsBind: { host: string; port: number } | null = null;
+  private eventListeners = new Set<EventCb>();
+
+  onEvent(cb: EventCb): () => void {
+    this.eventListeners.add(cb);
+    return () => {
+      this.eventListeners.delete(cb);
+    };
+  }
+
+  emitEvent(sessionId: string, event: Record<string, unknown>): void {
+    for (const listener of this.eventListeners) {
+      try {
+        listener(sessionId, event);
+      } catch {
+        /* listener must not break dispatch */
+      }
+    }
+  }
 
   async dispatch(req: Record<string, unknown>): Promise<Record<string, unknown>> {
     const cmd = req.cmd;
@@ -641,6 +676,7 @@ class Host {
       "mcp-toggle": (r) => this.cmdMcpToggle(r),
       "plugins-reload": (r) => this.cmdPluginsReload(r),
       "skills-reload": (r) => this.cmdSkillsReload(r),
+      wait: (r) => this.cmdWait(r),
       shutdown: (r) => this.cmdShutdown(r),
     };
     const fn = fns[String(cmd)];
@@ -649,7 +685,9 @@ class Host {
   }
 
   async cmdPing(_req: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return { ok: true, pid: process.pid };
+    const out: Record<string, unknown> = { ok: true, pid: process.pid };
+    if (this.wsBind) out.ws = this.wsBind;
+    return out;
   }
 
   async cmdStart(req: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -665,7 +703,7 @@ class Host {
     const id = resumeId || randomUUID();
     if (this.sessions[id]?.alive) return { ok: false, error: `session ${id} already live` };
     if (this.sessions[id]) await this.teardown(id);
-    const sess = new Session(id, cwd, name);
+    const sess = new Session(id, cwd, name, this);
     sess.permissionMode = permissionMode;
     this.sessions[id] = sess;
 
@@ -806,7 +844,8 @@ class Host {
     const label = this.sessions[id]?.name ?? "";
     if (id in this.sessions) await this.teardown(id);
     upsertSession(id, { alive: false, state: "dead" });
-    appendEvent(id, "dead", "stopped", {}, label);
+    const rec = appendEvent(id, "dead", "stopped", {}, label);
+    this.emitEvent(id, rec);
     return { ok: true, id };
   }
 
@@ -855,7 +894,9 @@ class Host {
       else if (!("usage" in rec)) rec.usage = null;
       rows.push(rec);
     }
-    return { ok: true, sessions: rows };
+    const out: Record<string, unknown> = { ok: true, sessions: rows };
+    if (this.wsBind) out.ws = this.wsBind;
+    return out;
   }
 
   async cmdEvents(req: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -1078,6 +1119,48 @@ class Host {
     return { ok: true, id: resolved.id, source: "tracked", subagents: tracked };
   }
 
+  sessPending(sess?: Session): PendingTool[] {
+    if (!sess) return [];
+    return Object.entries(sess.pending).map(([k, v]) => ({
+      tool_use_id: k,
+      tool: v.tool,
+      reason: v.reason,
+    }));
+  }
+
+  async cmdWait(req: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const parsed = parseWaitKinds(req.kinds ?? req.kind);
+    if (!parsed.ok) return parsed;
+    const timeoutSec = parseWaitTimeout(req.timeout);
+    const resolved = resolveSessionId(lookupKey(req), this.sessionRefs());
+    if (!resolved.ok) return resolved;
+    const id = resolved.id;
+    const sess = this.sessions[id];
+    const pending = this.sessPending(sess);
+    const alive = Boolean(sess?.alive);
+    const events = readEvents(id, null);
+    const start = matchWaitStart({ events, pending, alive, found: true }, parsed.kinds);
+    if (start.hit) return waitOk(id, start);
+    const afterTs = newestEventTs(events);
+    return await new Promise((resolve) => {
+      let settled = false;
+      const finish = (res: Record<string, unknown>) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        off();
+        resolve(res);
+      };
+      const timer = setTimeout(() => finish({ ok: false, error: "wait timeout" }), timeoutSec * 1000);
+      const off = this.onEvent((sessionId, event) => {
+        if (sessionId !== id) return;
+        const live = this.sessions[id];
+        const hit = matchWaitEvents([event], parsed.kinds, afterTs, this.sessPending(live));
+        if (hit.hit) finish(waitOk(id, hit));
+      });
+    });
+  }
+
   async cmdShutdown(_req: Record<string, unknown>): Promise<Record<string, unknown>> {
     for (const name of Object.keys(this.sessions)) {
       try {
@@ -1224,8 +1307,28 @@ export async function serve(): Promise<void> {
   chmodSync(SOCK_PATH, 0o600);
   void LOG_PATH;
 
+  let wsHandle: { close: () => Promise<void> } | null = null;
+  const wsEnv = readWsEnv();
+  if (wsEnv.token) {
+    wsHandle = await startWsServer({
+      token: wsEnv.token,
+      host: wsEnv.host,
+      port: wsEnv.port,
+      dispatch: (req) => host.dispatch(req),
+      onEvent: (cb) => host.onEvent(cb),
+    });
+    host.wsBind = { host: wsHandle.host, port: wsHandle.port };
+  }
+
   const stop = async () => {
     server.close();
+    if (wsHandle) {
+      try {
+        await wsHandle.close();
+      } catch {
+        /* ignore */
+      }
+    }
     await host.cmdShutdown({});
     try {
       unlinkSync(SOCK_PATH);

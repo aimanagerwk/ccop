@@ -251,3 +251,9 @@ session init 广告的 `skills` / `slash_commands` / `plugins` 落盘；`workflo
 Query 已有 `mcpServerStatus` / `setMcpServers` / `reconnectMcpServer` / `toggleMcpServer` / `reloadPlugins` / `reloadSkills`。host 只是把它们绑到 LiveClient（缺方法时与 `stopTask` 同样的明确错误），再暴露 CLI：`mcp`、`mcp-set`、`mcp-reconnect`、`mcp-toggle`、`plugins-reload`、`skills-reload`。
 
 `setMcpServers` 走当前会话的 SDK Query，不发明 MCP token、不写 secrets。空对象 `{}` 只影响动态加的 server；plugin 拥有的 server 不会因此被卸掉（SDK 自己的语义）。
+
+---
+
+## 远程管理（后补）
+
+远程客户端 = 本进程上的 WebSocket + header token（`CCOP_TOKEN`）。worker / SDK 会话仍在这台机器。协议见 [WS.md](./WS.md)。unix socket 留给本机 CLI。

@@ -66,3 +66,17 @@ describe("parseArgs host-gap flags", () => {
     });
   });
 });
+
+describe("parseArgs wait", () => {
+  it("wait ID", () => {
+    expect(parseArgs(["wait", "sess-1"])).toEqual({ cmd: "wait", args: { id: "sess-1" } });
+  });
+
+  it("wait ID --kind a,b --timeout SEC", () => {
+    expect(parseArgs(["wait", "sess-1", "--kind", "turn_done,failed", "--timeout", "12"])).toEqual({
+      cmd: "wait",
+      args: { id: "sess-1", kind: "turn_done,failed", timeout: 12 },
+    });
+  });
+});
+
