@@ -6,6 +6,7 @@ import {
   futureEvents,
   isOddSubtle,
   isPostToolUseFailure,
+  isUnknownMonitorCmd,
   matchMonitorEvent,
   matchMonitorPoll,
   matchMonitorStall,
@@ -14,6 +15,7 @@ import {
   parseMonitorStall,
   parseMonitorTimeout,
 } from "../src/monitor.js";
+import { Host } from "../src/daemon.js";
 
 const ev = (ts: number, kind: string, extra?: Record<string, unknown>) => ({
   ts,
@@ -142,5 +144,51 @@ describe("matchMonitor start/poll/ok", () => {
       reason: "failed",
       event,
     });
+  });
+});
+
+
+describe("isUnknownMonitorCmd", () => {
+  it("detects old daemon unknown monitor", () => {
+    expect(isUnknownMonitorCmd({ ok: false, error: "unknown cmd monitor" })).toBe(true);
+    expect(isUnknownMonitorCmd({ ok: false, error: "monitor timeout" })).toBe(false);
+  });
+});
+
+describe("cmdMonitor parking (Host, no Claude)", () => {
+  function liveHost(id: string): Host {
+    const host = new Host();
+    host.sessions[id] = {
+      id,
+      name: "unit-monitor",
+      title: undefined,
+      alive: true,
+      pending: {},
+    } as Host["sessions"][string];
+    return host;
+  }
+
+  it("parks on onEvent and two wait + two monitor wake independently", async () => {
+    const id = "00000000-0000-4000-8000-cmdmonitor0001";
+    const host = liveHost(id);
+    const waitA = host.dispatch({ cmd: "wait", id, kinds: ["turn_done"], timeout: 5 });
+    const waitB = host.dispatch({ cmd: "wait", id, kinds: ["turn_done"], timeout: 5 });
+    const monA = host.dispatch({ cmd: "monitor", id, kinds: ["turn_done"], timeout: 5, stall: 30 });
+    const monB = host.dispatch({ cmd: "monitor", id, kinds: ["turn_done"], timeout: 5, stall: 30 });
+    await new Promise((r) => setTimeout(r, 20));
+    const event = { ts: Date.now() / 1000 + 1, kind: "turn_done", summary: "unit", extra: {} };
+    host.emitEvent(id, event);
+    const [wa, wb, ma, mb] = await Promise.all([waitA, waitB, monA, monB]);
+    expect(wa).toMatchObject({ ok: true, id, woke: "turn_done" });
+    expect(wb).toMatchObject({ ok: true, id, woke: "turn_done" });
+    expect(ma).toMatchObject({ ok: true, id, woke: "turn_done", reason: "turn_done" });
+    expect(mb).toMatchObject({ ok: true, id, woke: "turn_done", reason: "turn_done" });
+  });
+
+  it("stall wake without writing session files", async () => {
+    const id = "00000000-0000-4000-8000-cmdmonitor0002";
+    const host = liveHost(id);
+    const res = await host.dispatch({ cmd: "monitor", id, kinds: ["turn_done"], timeout: 5, stall: 0 });
+    expect(res).toMatchObject({ ok: true, id, woke: "stall", reason: "stall" });
   });
 });

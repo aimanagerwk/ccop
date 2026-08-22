@@ -225,4 +225,31 @@ describe("ws server", () => {
     });
     ws.close();
   });
+
+  it("two sockets monitor: each gets events then own woke", async () => {
+    let release!: (v: Record<string, unknown>) => void;
+    const parked = new Promise<Record<string, unknown>>((r) => {
+      release = r;
+    });
+    const { port, ev } = await listen(async (req) => {
+      if (req.cmd === "monitor") return parked;
+      return { ok: true };
+    });
+    const hdr = { headers: { Authorization: `Bearer ${token}` } };
+    const a = new WebSocket(`ws://127.0.0.1:${port}/v1`, hdr);
+    const b = new WebSocket(`ws://127.0.0.1:${port}/v1`, hdr);
+    await Promise.all([waitOpen(a), waitOpen(b)]);
+    a.send(JSON.stringify({ cmd: "monitor", id: "keep", req_id: "ma" }));
+    b.send(JSON.stringify({ cmd: "monitor", id: "keep", req_id: "mb" }));
+    await new Promise((r) => setTimeout(r, 40));
+    ev.fire("keep", { kind: "working", summary: "tick", extra: {} });
+    expect(await waitMsg(a)).toEqual({ type: "event", id: "keep", event: { kind: "working", summary: "tick", extra: {} } });
+    expect(await waitMsg(b)).toEqual({ type: "event", id: "keep", event: { kind: "working", summary: "tick", extra: {} } });
+    const woke = { ok: true, id: "keep", woke: "turn_done", reason: "turn_done", event: { kind: "turn_done" } };
+    release(woke);
+    expect(await waitMsg(a)).toEqual({ type: "woke", ...woke, req_id: "ma" });
+    expect(await waitMsg(b)).toEqual({ type: "woke", ...woke, req_id: "mb" });
+    a.close();
+    b.close();
+  });
 });

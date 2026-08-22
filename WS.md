@@ -70,8 +70,9 @@ upgrade 时带其一：
 | `plugins-reload` | `id` | |
 | `skills-reload` | `id` | |
 | `wait` | `id` | `kinds`（数组或逗号串；默认 needs_decision,needs_info,turn_done,failed,dead）、`timeout`（秒，默认 3600） |
+| `monitor` | `id` | `kinds`（同 wait）、`timeout`（秒，默认 3600）、`stall`（秒，默认 180） |
 
-CLI `monitor` = `wait` + 实时事件流 + stall/PostToolUseFailure/pending；默认 kinds 含 `turn_done`。当前是本地 CLI poll，不是这条 WS dispatch 上的 cmd。
+`wait` / `monitor` **park 在 daemon 的 Host.onEvent**（不是客户端 poll）。unix 一问一答：`monitor` 结束时回 `{ok,id,woke,reason,event}`。WS `monitor` 等待期间推 `{type:"event"}`，最后 `{type:"woke",ok,id,woke,reason,event?,req_id}`。**多客户端、无 mutex**：同一 session（以及跨 session）上任意多条 unix RPC / WS 连接各自挂自己的 listener（`Set`），匹配事件时全部独立醒。N 个 `watch` / `monitor` socket 各自收自己的 event（+ monitor 自己的 woke）。CLI poll 只给旧 live 进程（unknown cmd）。
 | `shutdown` | | 能用，不是远程管理的正经路径。关 daemon。 |
 
 WS 另有（不进 unix `dispatch`）：
@@ -105,7 +106,7 @@ WS 另有（不进 unix `dispatch`）：
 
     { "type": "event", "id": "<session-uuid>", "event": { "kind": "...", "summary": "...", "extra": {}, "ts": 1770000000.1 } }
 
-`id` 是 session UUID。`event` 就是落盘那条（`kind` / `summary` / `extra` / `ts`，还有 `id`/`name`）。推送没有 `req_id`。没有别的 `type`。
+`id` 是 session UUID。`event` 就是落盘那条（`kind` / `summary` / `extra` / `ts`，还有 `id`/`name`）。watch 推送没有 `req_id`。`monitor` 另有最终 `{type:"woke"}`（带 `req_id`）。多 socket 各挂各的，无互斥。
 
     → {"cmd":"unwatch","req_id":"u1"}
     ← {"ok":true,"req_id":"u1"}

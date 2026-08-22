@@ -74,7 +74,7 @@ sequenceDiagram
 
 统一：成功/失败都是一行 JSON。ok:false 时退出码 1。
 
-远程 WS（`CCOP_TOKEN` 才听）：协议见 [WS.md](./WS.md)。
+远程 WS（`CCOP_TOKEN` 才听）：协议见 [WS.md](./WS.md)。Web 操作面在 [web/](./web)（Next.js，协议仍是 WS.md）。
 
 在 /workspace/ccop 跑 `npx tsx src/cli.ts <cmd>`（等价 `npm start -- <cmd>`；`npm run up` 只拉 daemon）。ID 是 Claude session UUID。
 
@@ -90,8 +90,8 @@ sequenceDiagram
 - `deny ID tool_use_id` — 拒绝一条 parked 工具。
 - `status` — 列出全部会话：活/死、lock、pending、用量、skills。
 - `events ID [--tail N]` — 读这条会话的分类事件，可 tail。
-- `wait ID [--kind a,b] [--timeout SEC]` — 阻塞直到**之后**出现 wake kind（默认 `needs_decision,needs_info,turn_done,failed,dead`）。已死立刻 `{ok:true,woke:"dead"}`；已有 pending 且 kinds 含 `needs_decision` 立刻返回 pending。超时 `{ok:false,error:"wait timeout"}` 退出 1。当前 daemon 若无 wait RPC，CLI 每 ~400ms poll `events`/`status`。
-- `monitor ID [--kind a,b] [--timeout SEC] [--stall SEC]` — **wait + live event stream**：同样的未来事件规则，默认 kinds 与 wait 相同（含 `turn_done`，做完一轮会醒）。等待期间每条新事件一行 JSON；再打一行最终 `{ok:true,id,woke,reason,event?}` 后退出 0。额外 odd wake：`PostToolUseFailure`（summary/hook）、`--stall` 秒无新事件且仍活着（默认 180）、pending 工具。超时 `{ok:false,error:"monitor timeout"}` 退出 1。CLI poll，不重启 daemon。
+- `wait ID [--kind a,b] [--timeout SEC]` — **park 在 daemon 的 Host.onEvent 上**（不是 CLI 第二套 poller），直到**之后**出现 wake kind（默认 `needs_decision,needs_info,turn_done,failed,dead`）。已死立刻 `{ok:true,woke:"dead"}`；已有 pending 且 kinds 含 `needs_decision` 立刻返回 pending。超时 `{ok:false,error:"wait timeout"}` 退出 1。多客户端：同一 session 上任意多条 wait/monitor 各自挂自己的 listener（Set），无 mutex，匹配事件时各自独立醒。CLI poll `events`/`status` 只给**旧 live daemon**（unknown cmd wait）兜底。
+- `monitor ID [--kind a,b] [--timeout SEC] [--stall SEC]` — **同样 park 在 daemon**：wait + odd wake（`PostToolUseFailure`、`--stall` 秒无新事件默认 180、pending）。unix RPC 一问一答，返回 `{ok,id,woke,reason,event}`（unix 不流中间事件）。WS 可先推 `{type:"event"}` 再 `{type:"woke"}`。默认 kinds 与 wait 相同（含 `turn_done`）。超时 `{ok:false,error:"monitor timeout"}` 退出 1。多客户端无 mutex，各自 listener。CLI poll 只给旧 live 进程（unknown cmd monitor）。
 - `info ID` — 单会话快照：effort、workflow、用量、skills、plugins，便宜时带 mcp_servers。
 - `workflows ID` — 列出 session 广告过的 skills / slash / plugins。host 不 invoke。
 - `tasks ID` — 列出 SDK 任务。
@@ -183,9 +183,10 @@ cost_usd 是 SDK 估算（ResultMessage.total_cost_usd，流式 query() 取最�
     {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "woke": "dead", "event": {"kind": "dead", "summary": "session not live"}}
     {"ok": false, "error": "wait timeout"}
 
-例 monitor（先流新事件，最后一行才是 wake；`turn_done` 会停，不是只跟不醒）：
+例 wait / monitor：真正的等待在 daemon 里（Host.onEvent）。unix RPC 各连一条、各自 park，同一 id 上两条 wait + 两条 monitor 都会在匹配事件上独立醒。CLI 中间事件流只出现在旧 daemon 的 poll 兜底；新 daemon 的 unix `monitor` 只回一行最终 JSON。
 
-    {"ts": 1770000000.2, "kind": "working", "summary": "tool Bash", "extra": {}}
+例 monitor（RPC 一行；旧进程 poll 才会先流新事件）：
+
     {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "woke": "turn_done", "reason": "turn_done", "event": {"ts": 1770000001.0, "kind": "turn_done", "summary": "result message (turn, not task)", "extra": {}}}
     {"ok": true, "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "woke": "stall", "reason": "stall"}
     {"ok": false, "error": "monitor timeout"}

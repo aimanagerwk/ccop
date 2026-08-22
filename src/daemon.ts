@@ -29,6 +29,14 @@ import {
   waitOk,
   type PendingTool,
 } from "./wait.js";
+import {
+  matchMonitorEvent,
+  matchMonitorStall,
+  matchMonitorStart,
+  monitorOk,
+  parseMonitorStall,
+  parseMonitorTimeout,
+} from "./monitor.js";
 
 export const HOOK_EVENTS = [
   "PreToolUse",
@@ -677,6 +685,7 @@ export class Host {
       "plugins-reload": (r) => this.cmdPluginsReload(r),
       "skills-reload": (r) => this.cmdSkillsReload(r),
       wait: (r) => this.cmdWait(r),
+      monitor: (r) => this.cmdMonitor(r),
       shutdown: (r) => this.cmdShutdown(r),
     };
     const fn = fns[String(cmd)];
@@ -1152,12 +1161,87 @@ export class Host {
         resolve(res);
       };
       const timer = setTimeout(() => finish({ ok: false, error: "wait timeout" }), timeoutSec * 1000);
+      // Own listener on the shared Set — no mutex; N waits/monitors all wake.
       const off = this.onEvent((sessionId, event) => {
         if (sessionId !== id) return;
         const live = this.sessions[id];
         const hit = matchWaitEvents([event], parsed.kinds, afterTs, this.sessPending(live));
         if (hit.hit) finish(waitOk(id, hit));
       });
+    });
+  }
+
+  async cmdMonitor(req: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const parsed = parseWaitKinds(req.kinds ?? req.kind);
+    if (!parsed.ok) return parsed;
+    const timeoutSec = parseMonitorTimeout(req.timeout);
+    const stallSec = parseMonitorStall(req.stall);
+    const resolved = resolveSessionId(lookupKey(req), this.sessionRefs());
+    if (!resolved.ok) return resolved;
+    const id = resolved.id;
+    const sess = this.sessions[id];
+    const pending = this.sessPending(sess);
+    const alive = Boolean(sess?.alive);
+    const events = readEvents(id, null);
+    const start = matchMonitorStart({ events, pending, alive, found: true });
+    if (start.hit) return monitorOk(id, start);
+    const afterTs = newestEventTs(events);
+    return await new Promise((resolve) => {
+      let settled = false;
+      let lastNewMs = Date.now();
+      let stallTimer: ReturnType<typeof setTimeout> | undefined;
+      const finish = (res: Record<string, unknown>) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (stallTimer !== undefined) clearTimeout(stallTimer);
+        off();
+        resolve(res);
+      };
+      const timer = setTimeout(() => finish({ ok: false, error: "monitor timeout" }), timeoutSec * 1000);
+      const armStall = () => {
+        if (stallTimer !== undefined) clearTimeout(stallTimer);
+        const remaining = stallSec * 1000 - (Date.now() - lastNewMs);
+        stallTimer = setTimeout(() => {
+          const live = this.sessions[id];
+          const hit = matchMonitorStall(
+            { alive: Boolean(live?.alive), found: true },
+            lastNewMs,
+            Date.now(),
+            stallSec,
+          );
+          if (hit.hit) finish(monitorOk(id, hit));
+        }, Math.max(0, remaining));
+      };
+      // Own listener on the shared Set — no mutex; N waits/monitors all wake.
+      const off = this.onEvent((sessionId, event) => {
+        if (sessionId !== id) return;
+        lastNewMs = Date.now();
+        armStall();
+        const live = this.sessions[id];
+        const pendingNow = this.sessPending(live);
+        const hit = matchMonitorEvent(event, parsed.kinds, afterTs, pendingNow);
+        if (hit.hit) {
+          finish(monitorOk(id, hit));
+          return;
+        }
+        if (String(event.kind ?? "") === "dead") {
+          finish(monitorOk(id, { hit: true, woke: "dead", reason: "dead", event }));
+          return;
+        }
+        if (pendingNow.length > 0) {
+          finish(
+            monitorOk(id, {
+              hit: true,
+              woke: "needs_decision",
+              reason: "pending",
+              event: String(event.kind) === "needs_decision" ? event : { kind: "needs_decision", summary: "pending tools", extra: {} },
+              pending: pendingNow,
+            }),
+          );
+        }
+      });
+      armStall();
     });
   }
 

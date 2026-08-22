@@ -20,6 +20,7 @@ import {
   type WaitSnap,
 } from "./wait.js";
 import {
+  isUnknownMonitorCmd,
   matchMonitorEvent,
   matchMonitorPoll,
   matchMonitorStart,
@@ -353,9 +354,17 @@ async function cmdMonitorCli(args: Record<string, unknown>): Promise<void> {
   if (!parsed.ok) out({ ok: false, error: parsed.error }, 1);
   const timeoutSec = parseMonitorTimeout(args.timeout);
   const stallSec = parseMonitorStall(args.stall);
+  const { sendReq } = await import("./ipc.js");
   try {
-    await pollMonitor(args.id, parsed.kinds, timeoutSec, stallSec);
+    const res = await sendReq(
+      { cmd: "monitor", id: args.id, kinds: parsed.kinds, timeout: timeoutSec, stall: stallSec },
+      timeoutSec + 5,
+    );
+    if (isUnknownMonitorCmd(res)) return pollMonitor(args.id, parsed.kinds, timeoutSec, stallSec);
+    out(res, res.ok ? 0 : 1);
   } catch (exc: any) {
+    const msg = String(exc?.message || exc);
+    if (/unknown cmd/i.test(msg)) return pollMonitor(args.id, parsed.kinds, timeoutSec, stallSec);
     out({ ok: false, error: `daemon not reachable: ${exc}` }, 1);
   }
 }

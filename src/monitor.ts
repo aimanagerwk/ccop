@@ -1,4 +1,4 @@
-/** Monitor = wait + live event stream + extra odd wakes. CLI poll; no daemon RPC. */
+/** Monitor = wait + odd wakes (PostToolUseFailure, stall, pending). Daemon parks on Host.onEvent. */
 
 import {
   DEFAULT_WAIT_KINDS,
@@ -170,3 +170,7 @@ export function monitorOk(id: string, match: MonitorHit): Record<string, unknown
   return out;
 }
 
+
+export function isUnknownMonitorCmd(res: Record<string, unknown>): boolean {
+  return res.ok === false && /unknown cmd\s+monitor\b/i.test(String(res.error || ""));
+}

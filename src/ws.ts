@@ -123,11 +123,27 @@ function attachSocket(
       return;
     }
 
+    const prevWatch = watching;
+    const prevFilter = filterId;
+    if (cmd === "monitor") {
+      watching = true;
+      filterId = typeof req.id === "string" && req.id ? req.id : null;
+    }
+
     let res: Record<string, unknown>;
     try {
       res = await dispatch(req);
     } catch (exc: any) {
       res = { ok: false, error: `${exc?.name || "Error"}: ${exc?.message || exc}` };
+    }
+
+    if (cmd === "monitor") {
+      watching = prevWatch;
+      filterId = prevFilter;
+      if (res.ok) {
+        ws.send(JSON.stringify(echoIds(req, { type: "woke", ...res })));
+        return;
+      }
     }
     ws.send(JSON.stringify(echoIds(req, res)));
   });
