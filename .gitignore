@@ -1,3 +1,5 @@
+node_modules/
+dist/
 __pycache__/
 *.pyc
 .venv/
@@ -7,3 +9,6 @@ data/daemon.log
 data/sessions.json
 data/events/
 *.secret
+
+# runtime (do not commit)
+data/
