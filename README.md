@@ -74,34 +74,32 @@ sequenceDiagram
 
 统一：成功/失败都是一行 JSON。ok:false 时退出码 1。
 
-在 /workspace/ccop：
+在 /workspace/ccop 跑 `npx tsx src/cli.ts <cmd>`（等价 `npm start -- <cmd>`；`npm run up` 只拉 daemon）。ID 是 Claude session UUID。
 
-    npx tsx src/cli.ts up
-    npx tsx src/cli.ts down
-    npx tsx src/cli.ts start --cwd DIR --prompt TEXT [--name LABEL] [--resume-id UUID]
-    npx tsx src/cli.ts send ID TEXT
-    npx tsx src/cli.ts interrupt ID
-    npx tsx src/cli.ts hold ID
-    npx tsx src/cli.ts release ID
-    npx tsx src/cli.ts stop ID
-    npx tsx src/cli.ts approve ID tool_use_id
-    npx tsx src/cli.ts deny ID tool_use_id
-    npx tsx src/cli.ts status
-    npx tsx src/cli.ts events ID [--tail N]
-    npx tsx src/cli.ts info ID
-    npx tsx src/cli.ts workflows ID
-    npx tsx src/cli.ts tasks ID
-    npx tsx src/cli.ts task-stop ID TASK_ID
-    npx tsx src/cli.ts task-bg ID [tool_use_id]
-    npx tsx src/cli.ts subagents ID
-    npx tsx src/cli.ts mcp ID
-    npx tsx src/cli.ts mcp-set ID --json '{...}'   # or stdin JSON; {} allowed
-    npx tsx src/cli.ts mcp-reconnect ID SERVER
-    npx tsx src/cli.ts mcp-toggle ID SERVER --on|--off
-    npx tsx src/cli.ts plugins-reload ID
-    npx tsx src/cli.ts skills-reload ID
-
-等价：npm start -- status ； npm run up。
+- `up` — 拉起 daemon。已在跑则 {already:true}。
+- `down` — 关掉 daemon，卸 socket。
+- `start --cwd DIR --prompt TEXT [--name LABEL] [--resume-id UUID] [--permission-mode MODE]` — 开一条 live session，或按 UUID resume。默认 auto、max、workflow 开。
+- `send ID TEXT` — 往活会话再塞一轮。hold 时立刻 {error:held}。
+- `interrupt ID` — 打断当前 turn。
+- `hold ID` — 操作者锁：挡 send，连 Read 也 park，不自动放行。
+- `release ID` — 解开 hold。
+- `stop ID` — 关掉这条 live 客户端，记录还在，可 resume。
+- `approve ID tool_use_id` — 放行一条 parked 工具。
+- `deny ID tool_use_id` — 拒绝一条 parked 工具。
+- `status` — 列出全部会话：活/死、lock、pending、用量、skills。
+- `events ID [--tail N]` — 读这条会话的分类事件，可 tail。
+- `info ID` — 单会话快照：effort、workflow、用量、skills、plugins，便宜时带 mcp_servers。
+- `workflows ID` — 列出 session 广告过的 skills / slash / plugins。host 不 invoke。
+- `tasks ID` — 列出 SDK 任务。
+- `task-stop ID TASK_ID` — 停掉一条任务。
+- `task-bg ID [tool_use_id]` — 把当前或指定工具转后台。
+- `subagents ID` — 列出这条会话上的子代理。
+- `mcp ID` — 当前 MCP server 状态。
+- `mcp-set ID --json '{...}'` — 动态改 MCP 配置，也可 stdin JSON。空对象合法。
+- `mcp-reconnect ID SERVER` — 重连一台 MCP server。
+- `mcp-toggle ID SERVER --on|--off` — 开或关一台 MCP server。
+- `plugins-reload ID` — 热加载插件。
+- `skills-reload ID` — 热加载 skills。
 
 例 up/down：
 
