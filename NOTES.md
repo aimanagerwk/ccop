@@ -22,6 +22,9 @@ Identity: id is the Claude session UUID (options.sessionId / resume). title is C
     npx tsx src/cli.ts interrupt|hold|release|stop ID
     npx tsx src/cli.ts approve|deny ID tool_use_id
     npx tsx src/cli.ts events ID [--tail N]
+    npx tsx src/cli.ts info|workflows|tasks|subagents ID
+    npx tsx src/cli.ts task-stop ID TASK_ID
+    npx tsx src/cli.ts task-bg ID [tool_use_id]
 
 npm scripts: `npm start -- <cmd>`, `npm run up`, `npm test`.
 

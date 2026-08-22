@@ -146,8 +146,14 @@ function parseArgs(argv: string[]): { cmd: string; args: Record<string, unknown>
   } else if (cmd === "send") {
     args.id = rest[0];
     args.text = rest.slice(1).join(" ");
-  } else if (["interrupt", "hold", "release", "stop"].includes(cmd)) {
+  } else if (["interrupt", "hold", "release", "stop", "info", "workflows", "tasks", "subagents"].includes(cmd)) {
     args.id = rest[0];
+  } else if (cmd === "task-stop") {
+    args.id = rest[0];
+    args.task_id = rest[1];
+  } else if (cmd === "task-bg") {
+    args.id = rest[0];
+    if (rest[1]) args.tool_use_id = rest[1];
   } else if (cmd === "approve" || cmd === "deny") {
     args.id = rest[0];
     args.tool_use_id = rest[1];
@@ -184,7 +190,11 @@ export async function main(argv?: string[]): Promise<void> {
     );
   }
   if (cmd === "send") return rpc({ cmd: "send", id: args.id, text: args.text });
-  if (["interrupt", "hold", "release", "stop"].includes(cmd)) return rpc({ cmd, id: args.id });
+  if (["interrupt", "hold", "release", "stop", "info", "workflows", "tasks", "subagents"].includes(cmd)) {
+    return rpc({ cmd, id: args.id });
+  }
+  if (cmd === "task-stop") return rpc({ cmd: "task-stop", id: args.id, task_id: args.task_id });
+  if (cmd === "task-bg") return rpc({ cmd: "task-bg", id: args.id, tool_use_id: args.tool_use_id ?? null });
   if (cmd === "approve") return rpc({ cmd: "approve", id: args.id, tool_use_id: args.tool_use_id });
   if (cmd === "deny") return rpc({ cmd: "deny", id: args.id, tool_use_id: args.tool_use_id });
   if (cmd === "events") return rpc({ cmd: "events", id: args.id, tail: args.tail ?? null });

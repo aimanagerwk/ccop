@@ -228,3 +228,20 @@ NAME 当初是给我自己当短把手，避免抄 UUID。名字会撞，而且 
 7. 真要停：`stop <uuid>`。整机收工：`down`。
 
 人要自己看画面：不要用本进程，去开 `claude --bg`，用官方 attach。
+
+
+---
+
+## P-note（后补）：用量、workflow、子代理 / 后台任务
+
+**曾经**  
+`status` 不带 token / cost。workflow、subagent、background task 只当事件观察（classify + events），没有 list / stop / background。
+
+**现在**  
+ResultMessage 到来时把最新一条（不要相加）写入 session.usage：`cost_usd` = `total_cost_usd`，`model_usage` = `modelUsage`（正确账本），`last_turn_usage` = 主循环 `usage`。`status` 每行带 `cost_usd`、modelUsage 合计 tokens、`model_usage`。这是 SDK 估算，不是账单。历史会话可以 usage=null。
+
+session init 广告的 `skills` / `slash_commands` / `plugins` 落盘；`workflows` / `info` 列出它们。host 不调用 workflow。
+
+从 `task_notification` / `task_started` / `task_progress` / `background_tasks_changed` 和 SubagentStart/Stop hook 跟踪任务。CLI：`tasks` / `task-stop` / `task-bg` / `subagents`。`stopTask` / `backgroundTasks` 走活 Query；Python 形客户端没有这些方法时返回明确错误。`listSubagents` 优先 SDK，否则用跟踪列表。
+
+每条 session 默认 `ultracode: true` + `enableWorkflows: true` + `effort: "xhigh"`。

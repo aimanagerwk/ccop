@@ -14,6 +14,11 @@ import {
   upsertSession,
   type SessionRef,
 } from "./store.js";
+import {
+  extractUsageFromResult,
+  usageStatusFields,
+  type SessionUsage,
+} from "./usage.js";
 
 export const HOOK_EVENTS = [
   "PreToolUse",
@@ -43,12 +48,47 @@ type Pending = {
   reason?: string;
 };
 
+export type TrackedTask = {
+  task_id: string;
+  tool_use_id?: string;
+  status: string;
+  summary?: string;
+  usage?: unknown;
+};
+
+export type TrackedSubagent = {
+  agent_id: string;
+  agent_type?: string;
+  status: string;
+};
+
+function queryMethodMissing(name: string): never {
+  throw new Error(`${name} is not available on this client (Python-shaped / no Query.${name})`);
+}
+
+function bindQueryControl(obj: any): Pick<LiveClient, "stopTask" | "backgroundTasks"> {
+  return {
+    async stopTask(taskId: string) {
+      const fn = obj?.stopTask ?? obj?.stop_task;
+      if (typeof fn !== "function") queryMethodMissing("stopTask");
+      await fn.call(obj, taskId);
+    },
+    async backgroundTasks(toolUseId?: string) {
+      const fn = obj?.backgroundTasks ?? obj?.background_tasks;
+      if (typeof fn !== "function") queryMethodMissing("backgroundTasks");
+      return await fn.call(obj, toolUseId);
+    },
+  };
+}
+
 type LiveClient = {
   query: (text: string) => Promise<void>;
   interrupt: () => Promise<void>;
   disconnect: () => Promise<void>;
   receiveMessages: () => AsyncIterable<unknown>;
   getServerInfo: () => Promise<unknown>;
+  stopTask: (taskId: string) => Promise<void>;
+  backgroundTasks: (toolUseId?: string) => Promise<boolean>;
 };
 
 async function openLiveClient(options: Record<string, unknown>, firstPrompt: string): Promise<LiveClient> {
@@ -79,6 +119,7 @@ async function openLiveClient(options: Record<string, unknown>, firstPrompt: str
         if (typeof client.initializationResult === "function") return client.initializationResult();
         return null;
       },
+      ...bindQueryControl(client),
     };
   }
 
@@ -144,6 +185,7 @@ async function openLiveClient(options: Record<string, unknown>, firstPrompt: str
         return null;
       }
     },
+    ...bindQueryControl(q),
   };
 }
 
@@ -162,6 +204,13 @@ class Session {
   pending: Record<string, Pending> = {};
   alive = false;
   policy = policyMod.loadPolicy();
+  ultracode = true;
+  usage: SessionUsage | null = null;
+  skills: string[] = [];
+  slash_commands: string[] = [];
+  plugins: unknown[] = [];
+  tasks: Record<string, TrackedTask> = {};
+  subagents: TrackedSubagent[] = [];
 
   constructor(id: string, cwd: string, name = "") {
     this.id = id;
@@ -171,6 +220,23 @@ class Session {
 
   get sdkSessionId(): string {
     return this.id;
+  }
+
+  applyAdvertised(m: any): void {
+    if (Array.isArray(m.skills)) this.skills = m.skills.map(String);
+    if (Array.isArray(m.slash_commands)) this.slash_commands = m.slash_commands.map(String);
+    else if (Array.isArray(m.slashCommands)) this.slash_commands = m.slashCommands.map(String);
+    if (Array.isArray(m.plugins)) this.plugins = m.plugins;
+  }
+
+  upsertTask(row: TrackedTask): void {
+    if (!row.task_id) return;
+    const prev = this.tasks[row.task_id] || { task_id: row.task_id, status: "" };
+    this.tasks[row.task_id] = {
+      ...prev,
+      ...Object.fromEntries(Object.entries(row).filter(([, v]) => v !== undefined)),
+    };
+    this.persist();
   }
 
   persist(): void {
@@ -187,6 +253,13 @@ class Session {
         reason: v.reason,
         input: v.input || {},
       })),
+      ultracode: this.ultracode,
+      usage: this.usage,
+      skills: this.skills,
+      slash_commands: this.slash_commands,
+      plugins: this.plugins,
+      tasks: Object.values(this.tasks),
+      subagents: this.subagents,
     });
   }
 
@@ -255,6 +328,24 @@ class Session {
     const evName = String(payload.hook_event_name || payload.hook_event || payload.hookEventName || "");
     if (toolUseId && !("tool_use_id" in payload)) payload.tool_use_id = toolUseId;
     this.emit(classify.fromHook(evName, payload));
+    if (evName === "SubagentStart") {
+      const agentId = String(payload.agent_id || payload.agentId || toolUseId || "");
+      const agentType = String(payload.agent_type || payload.agentType || "");
+      if (agentId) this.subagents = this.subagents.filter((s) => s.agent_id !== agentId);
+      this.subagents.push({ agent_id: agentId, agent_type: agentType || undefined, status: "running" });
+      this.persist();
+    } else if (evName === "SubagentStop") {
+      const agentId = String(payload.agent_id || payload.agentId || toolUseId || "");
+      let hit = false;
+      for (const s of this.subagents) {
+        if (!agentId || s.agent_id === agentId) {
+          s.status = "stopped";
+          hit = true;
+        }
+      }
+      if (!hit && agentId) this.subagents.push({ agent_id: agentId, status: "stopped" });
+      this.persist();
+    }
     void payload.session_id;
     void payload.sessionId;
     return {};
@@ -272,8 +363,12 @@ class Session {
         this.ingestSessionId(msg);
         const m = msg as any;
         const typeName = m?.constructor?.name || "";
-        if (m?.type === "result" || typeName === "ResultMessage") {
-          if (m.session_id || m.sessionId) this.persist();
+        const type = m?.type;
+        const subtype = m?.subtype;
+        if (type === "result" || typeName === "ResultMessage") {
+          const extracted = extractUsageFromResult(m);
+          if (extracted) this.usage = extracted;
+          this.persist();
           this.emit(
             classify.fromResult({
               is_error: Boolean(m.is_error ?? m.isError),
@@ -281,7 +376,29 @@ class Session {
               result: m.result ?? null,
             }),
           );
-        } else if (m?.type === "task_notification" || typeName === "TaskNotificationMessage") {
+        } else if ((type === "system" && subtype === "init") || typeName === "SystemInitMessage") {
+          this.applyAdvertised(m);
+          this.persist();
+          this.emit([{ kind: "working", summary: "init", extra: { type: "system", subtype: "init" } }]);
+        } else if (type === "system" && subtype === "commands_changed") {
+          const cmds = m.commands;
+          if (Array.isArray(cmds)) {
+            this.slash_commands = cmds.map((c: any) => (typeof c === "string" ? c : c?.name || String(c)));
+            this.persist();
+          }
+          this.emit([{ kind: "working", summary: "commands_changed", extra: {} }]);
+        } else if (
+          type === "task_notification" ||
+          subtype === "task_notification" ||
+          typeName === "TaskNotificationMessage"
+        ) {
+          this.upsertTask({
+            task_id: String(m.task_id || m.taskId || ""),
+            tool_use_id: m.tool_use_id || m.toolUseId,
+            status: String(m.status ?? ""),
+            summary: m.summary || "",
+            usage: m.usage,
+          });
           this.emit(
             classify.fromTaskNotification({
               status: String(m.status ?? ""),
@@ -289,6 +406,50 @@ class Session {
               task_id: m.task_id || m.taskId || "",
             }),
           );
+        } else if (subtype === "task_started" || type === "task_started") {
+          this.upsertTask({
+            task_id: String(m.task_id || m.taskId || ""),
+            tool_use_id: m.tool_use_id || m.toolUseId,
+            status: "running",
+            summary: m.description || m.summary || m.workflow_name || "task started",
+          });
+          this.emit([{ kind: "working", summary: "task_started", extra: { task_id: m.task_id || m.taskId } }]);
+        } else if (subtype === "task_progress" || type === "task_progress") {
+          this.upsertTask({
+            task_id: String(m.task_id || m.taskId || ""),
+            tool_use_id: m.tool_use_id || m.toolUseId,
+            status: "running",
+            summary: m.summary || m.description || "task progress",
+            usage: m.usage,
+          });
+          this.emit([{ kind: "working", summary: "task_progress", extra: { task_id: m.task_id || m.taskId } }]);
+        } else if (subtype === "task_updated" || type === "task_updated") {
+          const patch = m.patch || {};
+          this.upsertTask({
+            task_id: String(m.task_id || m.taskId || ""),
+            status: patch.status || "running",
+            summary: patch.description || patch.error,
+          });
+          this.emit([{ kind: "working", summary: "task_updated", extra: { task_id: m.task_id || m.taskId } }]);
+        } else if (subtype === "background_tasks_changed" || type === "background_tasks_changed") {
+          const live = Array.isArray(m.tasks) ? m.tasks : [];
+          const liveIds = new Set(live.map((t: any) => String(t.task_id || t.taskId || "")));
+          for (const t of live) {
+            const id = String(t.task_id || t.taskId || "");
+            if (!id) continue;
+            this.upsertTask({
+              task_id: id,
+              status: this.tasks[id]?.status || "running",
+              summary: t.description || this.tasks[id]?.summary,
+            });
+          }
+          for (const [id, t] of Object.entries(this.tasks)) {
+            if (!liveIds.has(id) && (t.status === "running" || t.status === "pending")) {
+              t.status = "background_gone";
+            }
+          }
+          this.persist();
+          this.emit([{ kind: "working", summary: "background_tasks_changed", extra: { n: live.length } }]);
         } else if (m?.type === "assistant" || typeName === "AssistantMessage") {
           const blocks = m.message?.content || m.content || [];
           for (const block of blocks) {
@@ -312,12 +473,12 @@ class Session {
             }
           }
         } else {
-          const subtype = m?.subtype || typeName || m?.type || "message";
+          const label = subtype || typeName || type || "message";
           this.emit([
             {
               kind: "working",
-              summary: String(subtype),
-              extra: { type: typeName || m?.type },
+              summary: String(label),
+              extra: { type: typeName || type },
             },
           ]);
         }
@@ -361,6 +522,12 @@ class Host {
       stop: (r) => this.cmdStop(r),
       status: (r) => this.cmdStatus(r),
       events: (r) => this.cmdEvents(r),
+      info: (r) => this.cmdInfo(r),
+      workflows: (r) => this.cmdWorkflows(r),
+      tasks: (r) => this.cmdTasks(r),
+      "task-stop": (r) => this.cmdTaskStop(r),
+      "task-bg": (r) => this.cmdTaskBg(r),
+      subagents: (r) => this.cmdSubagents(r),
       shutdown: (r) => this.cmdShutdown(r),
     };
     const fn = fns[String(cmd)];
@@ -401,6 +568,9 @@ class Host {
       canUseTool,
       permissionMode: "default",
       settingSources: ["user", "project", "local"],
+      ultracode: true,
+      enableWorkflows: true,
+      effort: "xhigh",
       hooks,
     };
     if (resumeId) common.resume = resumeId;
@@ -543,6 +713,10 @@ class Host {
           tool: v.tool,
           reason: v.reason,
         }));
+        rec.ultracode = live.ultracode;
+        rec.skills = live.skills;
+        rec.slash_commands = live.slash_commands;
+        rec.plugins = live.plugins;
       }
       if (!("name" in rec)) rec.name = "";
       if (!("title" in rec)) rec.title = null;
@@ -550,6 +724,14 @@ class Host {
       if (!("last_turn" in rec)) rec.last_turn = null;
       if (!("last_task" in rec)) rec.last_task = null;
       if (!("pending" in rec)) rec.pending = [];
+      if (!("ultracode" in rec)) rec.ultracode = true;
+      if (!("skills" in rec)) rec.skills = live?.skills ?? [];
+      if (!("slash_commands" in rec)) rec.slash_commands = live?.slash_commands ?? [];
+      if (!("plugins" in rec)) rec.plugins = live?.plugins ?? [];
+      const usage = (live?.usage ?? rec.usage) as SessionUsage | null | undefined;
+      Object.assign(rec, usageStatusFields(usage ?? null));
+      if (usage) rec.usage = usage;
+      else if (!("usage" in rec)) rec.usage = null;
       rows.push(rec);
     }
     return { ok: true, sessions: rows };
@@ -560,6 +742,107 @@ class Host {
     if (!resolved.ok) return resolved;
     const evs = readEvents(resolved.id, (req.tail as number | null | undefined) ?? null);
     return { ok: true, id: resolved.id, events: evs };
+  }
+
+  diskOrLive(id: string): { rec: Record<string, unknown>; live?: Session } {
+    const live = this.sessions[id];
+    const disk = listSessions().find((s) => String(s.id) === id) || { id };
+    const rec = { ...disk };
+    if (live) {
+      rec.skills = live.skills;
+      rec.slash_commands = live.slash_commands;
+      rec.plugins = live.plugins;
+      rec.usage = live.usage;
+      rec.ultracode = live.ultracode;
+      rec.tasks = Object.values(live.tasks);
+      rec.subagents = live.subagents;
+      rec.cwd = live.cwd;
+    }
+    return { rec, live };
+  }
+
+  async cmdInfo(req: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const resolved = resolveSessionId(lookupKey(req), this.sessionRefs());
+    if (!resolved.ok) return resolved;
+    const { rec } = this.diskOrLive(resolved.id);
+    const usage = (rec.usage as SessionUsage | null) ?? null;
+    return {
+      ok: true,
+      id: resolved.id,
+      ultracode: rec.ultracode ?? true,
+      skills: rec.skills ?? [],
+      slash_commands: rec.slash_commands ?? [],
+      plugins: rec.plugins ?? [],
+      usage,
+      ...usageStatusFields(usage),
+    };
+  }
+
+  async cmdWorkflows(req: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const resolved = resolveSessionId(lookupKey(req), this.sessionRefs());
+    if (!resolved.ok) return resolved;
+    const { rec } = this.diskOrLive(resolved.id);
+    return {
+      ok: true,
+      id: resolved.id,
+      skills: rec.skills ?? [],
+      slash_commands: rec.slash_commands ?? [],
+      plugins: rec.plugins ?? [],
+      note: "listed from session advertise (init); host does not invoke workflows — the model does",
+    };
+  }
+
+  async cmdTasks(req: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const resolved = resolveSessionId(lookupKey(req), this.sessionRefs());
+    if (!resolved.ok) return resolved;
+    const { rec, live } = this.diskOrLive(resolved.id);
+    const tasks = live ? Object.values(live.tasks) : Array.isArray(rec.tasks) ? rec.tasks : [];
+    return { ok: true, id: resolved.id, tasks };
+  }
+
+  async cmdTaskStop(req: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const sess = this.need(req);
+    if (!(sess instanceof Session)) return sess;
+    if (!sess.client || !sess.alive) return { ok: false, error: "session not live" };
+    const taskId = req.task_id as string | undefined;
+    if (!taskId) return { ok: false, error: "task_id required" };
+    try {
+      await sess.client.stopTask(taskId);
+      return { ok: true, id: sess.id, task_id: taskId };
+    } catch (exc: any) {
+      return { ok: false, error: String(exc?.message || exc) };
+    }
+  }
+
+  async cmdTaskBg(req: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const sess = this.need(req);
+    if (!(sess instanceof Session)) return sess;
+    if (!sess.client || !sess.alive) return { ok: false, error: "session not live" };
+    const toolUseId = (req.tool_use_id as string | undefined) || undefined;
+    try {
+      const backgrounded = await sess.client.backgroundTasks(toolUseId);
+      return { ok: true, id: sess.id, backgrounded, tool_use_id: toolUseId ?? null };
+    } catch (exc: any) {
+      return { ok: false, error: String(exc?.message || exc) };
+    }
+  }
+
+  async cmdSubagents(req: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const resolved = resolveSessionId(lookupKey(req), this.sessionRefs());
+    if (!resolved.ok) return resolved;
+    const { rec, live } = this.diskOrLive(resolved.id);
+    const cwd = String(live?.cwd || rec.cwd || "");
+    try {
+      const sdk = await import("@anthropic-ai/claude-agent-sdk");
+      if (typeof sdk.listSubagents === "function") {
+        const ids = await sdk.listSubagents(resolved.id, cwd ? { dir: cwd } : {});
+        return { ok: true, id: resolved.id, source: "sdk", subagents: ids };
+      }
+    } catch {
+      /* fall through to tracked */
+    }
+    const tracked = live?.subagents ?? (Array.isArray(rec.subagents) ? rec.subagents : []);
+    return { ok: true, id: resolved.id, source: "tracked", subagents: tracked };
   }
 
   async cmdShutdown(_req: Record<string, unknown>): Promise<Record<string, unknown>> {
