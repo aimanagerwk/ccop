@@ -87,6 +87,7 @@ label {
   min-height: 100vh;
   overflow: hidden;
 }
+.app > * { min-height: 0; min-width: 0; }
 .app.collapsed { --rail: 48px; }
 
 .rail {
@@ -249,10 +250,15 @@ label {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
   background: var(--bg);
 }
 .empty {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -264,10 +270,12 @@ label {
   font-size: 12px;
   color: var(--mute);
   padding: 8px 16px 6px;
+  flex-shrink: 0;
 }
 
 .transcript {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   padding: 12px 20px 20px;
 }
@@ -295,6 +303,7 @@ label {
   border-top: 1px solid #1b1b1b;
   padding: 8px 12px 10px;
   background: var(--panel);
+  flex-shrink: 0;
 }
 .composer {
   display: flex;
@@ -350,6 +359,7 @@ label {
   background: var(--panel);
   border-bottom: 1px solid var(--line);
   padding: 8px 16px;
+  flex-shrink: 0;
 }
 
 .toasts {
@@ -393,3 +403,27 @@ label {
 .grow { flex: 1; min-width: 140px; }
 
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0;}
+
+.ev.mute-row { grid-template-columns: 72px 1fr; color: var(--mute); font-size: 12px; padding: 6px 0; }
+.ev.bubble { display: block; border-bottom: 0; padding: 8px 0; }
+.ev.bubble .who { font-size: 11px; color: var(--mute); margin-bottom: 4px; }
+.ev.bubble .body {
+  display: inline-block;
+  max-width: min(80%, 640px);
+  padding: 8px 12px;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ev.bubble.user { text-align: right; }
+.ev.bubble.user .body { background: var(--sel); text-align: left; }
+.ev.bubble.assistant .body { background: var(--panel); border: 1px solid #2a2a2a; }
+.ev.thinking details, .ev.system details { color: var(--mute); font-size: 12px; }
+.think-body {
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--mute);
+  margin: 6px 0 0;
+}
+.sys-list { margin: 4px 0 0 18px; padding: 0; color: var(--mute); font-size: 12px; }
