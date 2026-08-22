@@ -196,3 +196,5 @@ daemon 不可达：
 
 不要用 ultracode 布尔（那会锁 xhigh）。dynamic workflow 永远开。`max` 不能写进 settings.json 的 effortLevel（那边最高 xhigh），所以必须由 host 传入。
 
+
+默认 `permissionMode: auto`。可用 `--permission-mode default` 对照。hold 仍会停；策略 deny 仍直接拒。

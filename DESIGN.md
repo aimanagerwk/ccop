@@ -114,7 +114,7 @@ hook（PreToolUse、PermissionRequest、PostToolUse、Stop、SubagentStop、Noti
 为了「跑通」把 permissionMode 调成 bypass。
 
 **现在怎么解**  
-`permissionMode: default`。自有 policy（`src/policy.ts`，可被 `data/policy.yaml` 覆盖）：
+`permissionMode: auto`（默认）。分类器先判；策略 deny 仍直接拒；hold 仍 park。自有 policy（`src/policy.ts`，可被 `data/policy.yaml` 覆盖）：
 
 - **allow**：Read / Grep / Glob（未 hold 时自动过）  
 - **ask**：Write / Edit / Bash 等，挂起等 `approve` / `deny`（按 `tool_use_id`）  

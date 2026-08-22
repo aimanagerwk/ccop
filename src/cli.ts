@@ -142,6 +142,7 @@ function parseArgs(argv: string[]): { cmd: string; args: Record<string, unknown>
       else if (rest[i] === "--prompt") args.prompt = rest[++i];
       else if (rest[i] === "--resume-id") args.resume_id = rest[++i];
       else if (rest[i] === "--name" || rest[i] === "-n") args.name = rest[++i];
+      else if (rest[i] === "--permission-mode") args.permission_mode = rest[++i];
     }
   } else if (cmd === "send") {
     args.id = rest[0];
@@ -185,6 +186,7 @@ export async function main(argv?: string[]): Promise<void> {
         cwd: args.cwd,
         prompt: args.prompt,
         resume_id: args.resume_id ?? null,
+        permission_mode: args.permission_mode ?? "auto",
       },
       120,
     );

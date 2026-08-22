@@ -214,6 +214,8 @@ class Session {
   plugins: unknown[] = [];
   tasks: Record<string, TrackedTask> = {};
   subagents: TrackedSubagent[] = [];
+  /** SDK permissionMode. Hardcoded default is auto (classifier). Hold still parks. Policy deny still wins. */
+  permissionMode = "auto";
 
   constructor(id: string, cwd: string, name = "") {
     this.id = id;
@@ -264,6 +266,7 @@ class Session {
       plugins: this.plugins,
       tasks: Object.values(this.tasks),
       subagents: this.subagents,
+      permission_mode: this.permissionMode,
     });
   }
 
@@ -275,9 +278,14 @@ class Session {
     const toolUseId = ctx?.toolUseID || ctx?.tool_use_id || `anon-${Object.keys(this.pending).length + 1}`;
     const decision = policyMod.decide(toolName, toolInput, this.policy);
     if (decision === "deny") return PermissionResultDeny(`policy deny ${toolName}`);
-    const auto = decision === "allow" && this.lock !== "operator";
-    if (auto) return PermissionResultAllow();
-    const reason = decision === "allow" && this.lock === "operator" ? "held" : "ask";
+    // permissionMode auto: model classifier / host does not park ask tools.
+    // Policy deny above still wins. Hold still parks even in auto.
+    const autoPass =
+      this.lock !== "operator" && (decision === "allow" || this.permissionMode === "auto");
+    if (autoPass) return PermissionResultAllow();
+    const reason = this.lock === "operator" && (decision === "allow" || this.permissionMode === "auto")
+      ? "held"
+      : "ask";
     const item: Pending = {
       resolve: () => {},
       reject: () => {},
@@ -403,21 +411,38 @@ class Session {
             summary: m.summary || "",
             usage: m.usage,
           });
-          this.emit(
-            classify.fromTaskNotification({
+          const tn = classify.fromTaskNotification({
               status: String(m.status ?? ""),
               summary: m.summary || "",
               task_id: m.task_id || m.taskId || "",
-            }),
-          );
+            });
+          for (const e of tn) {
+            e.extra = {
+              ...e.extra,
+              tool_use_id: m.tool_use_id || m.toolUseId,
+              skip_transcript: m.skip_transcript ?? m.skipTranscript,
+              usage: m.usage,
+            };
+          }
+          this.emit(tn);
         } else if (subtype === "task_started" || type === "task_started") {
+          const extraStarted: Record<string, unknown> = {
+            task_id: m.task_id || m.taskId,
+            tool_use_id: m.tool_use_id || m.toolUseId,
+            task_type: m.task_type ?? m.taskType,
+            workflow_name: m.workflow_name ?? m.workflowName,
+            is_backgrounded: m.is_backgrounded ?? m.isBackgrounded,
+            spawn_depth: m.spawn_depth ?? m.spawnDepth,
+            skip_transcript: m.skip_transcript ?? m.skipTranscript,
+            description: m.description,
+          };
           this.upsertTask({
             task_id: String(m.task_id || m.taskId || ""),
             tool_use_id: m.tool_use_id || m.toolUseId,
             status: "running",
             summary: m.description || m.summary || m.workflow_name || "task started",
           });
-          this.emit([{ kind: "working", summary: "task_started", extra: { task_id: m.task_id || m.taskId } }]);
+          this.emit([{ kind: "working", summary: "task_started", extra: extraStarted }]);
         } else if (subtype === "task_progress" || type === "task_progress") {
           this.upsertTask({
             task_id: String(m.task_id || m.taskId || ""),
@@ -426,7 +451,17 @@ class Session {
             summary: m.summary || m.description || "task progress",
             usage: m.usage,
           });
-          this.emit([{ kind: "working", summary: "task_progress", extra: { task_id: m.task_id || m.taskId } }]);
+          this.emit([{
+            kind: "working",
+            summary: "task_progress",
+            extra: {
+              task_id: m.task_id || m.taskId,
+              description: m.description,
+              last_tool_name: m.last_tool_name ?? m.lastToolName,
+              subagent_type: m.subagent_type ?? m.subagentType,
+              usage: m.usage,
+            },
+          }]);
         } else if (subtype === "task_updated" || type === "task_updated") {
           const patch = m.patch || {};
           this.upsertTask({
@@ -434,7 +469,7 @@ class Session {
             status: patch.status || "running",
             summary: patch.description || patch.error,
           });
-          this.emit([{ kind: "working", summary: "task_updated", extra: { task_id: m.task_id || m.taskId } }]);
+          this.emit([{ kind: "working", summary: "task_updated", extra: { task_id: m.task_id || m.taskId, patch } }]);
         } else if (subtype === "background_tasks_changed" || type === "background_tasks_changed") {
           const live = Array.isArray(m.tasks) ? m.tasks : [];
           const liveIds = new Set(live.map((t: any) => String(t.task_id || t.taskId || "")));
@@ -453,7 +488,21 @@ class Session {
             }
           }
           this.persist();
-          this.emit([{ kind: "working", summary: "background_tasks_changed", extra: { n: live.length } }]);
+          this.emit([{
+            kind: "working",
+            summary: "background_tasks_changed",
+            extra: {
+              n: live.length,
+              tasks: live.map((t: any) => ({
+                task_id: t.task_id || t.taskId || t.id,
+                type: t.type,
+                name: t.name,
+                status: t.status,
+                description: t.description,
+                agent_type: t.agent_type || t.agentType,
+              })),
+            },
+          }]);
         } else if (m?.type === "assistant" || typeName === "AssistantMessage") {
           const blocks = m.message?.content || m.content || [];
           for (const block of blocks) {
@@ -548,11 +597,16 @@ class Host {
     const cwd = req.cwd as string | undefined;
     const prompt = req.prompt as string | undefined;
     const resumeId = (req.resume_id as string | undefined) || undefined;
+    const permissionMode =
+      typeof req.permission_mode === "string" && req.permission_mode.trim()
+        ? String(req.permission_mode).trim()
+        : "auto";
     if (!cwd || prompt === undefined) return { ok: false, error: "start requires cwd, prompt" };
     const id = resumeId || randomUUID();
     if (this.sessions[id]?.alive) return { ok: false, error: `session ${id} already live` };
     if (this.sessions[id]) await this.teardown(id);
     const sess = new Session(id, cwd, name);
+    sess.permissionMode = permissionMode;
     this.sessions[id] = sess;
 
     const hookCb = async (hookInput: unknown, toolUseId: string | null) => sess.onHook(hookInput, toolUseId);
@@ -570,7 +624,7 @@ class Host {
       includeHookEvents: true,
       forwardSubagentText: true,
       canUseTool,
-      permissionMode: "default",
+      permissionMode,
       settingSources: ["user", "project", "local"],
       ultracode: false,
       enableWorkflows: true,
@@ -621,7 +675,7 @@ class Host {
         /* already logged in loop */
       }
     });
-    return { ok: true, id, name: sess.name, title: sess.title, sdk_session_id: sess.id };
+    return { ok: true, id, name: sess.name, title: sess.title, sdk_session_id: sess.id, permission_mode: sess.permissionMode };
   }
 
   async cmdSend(req: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -719,6 +773,7 @@ class Host {
         }));
         rec.effort = live.effort;
         rec.enable_workflows = live.enableWorkflows;
+        rec.permission_mode = live.permissionMode;
         rec.skills = live.skills;
         rec.slash_commands = live.slash_commands;
         rec.plugins = live.plugins;
@@ -761,6 +816,7 @@ class Host {
       rec.usage = live.usage;
       rec.effort = live.effort;
       rec.enable_workflows = live.enableWorkflows;
+      rec.permission_mode = live.permissionMode;
       rec.tasks = Object.values(live.tasks);
       rec.subagents = live.subagents;
       rec.cwd = live.cwd;
@@ -778,6 +834,7 @@ class Host {
       id: resolved.id,
       effort: rec.effort ?? "max",
       enable_workflows: rec.enable_workflows ?? true,
+      permission_mode: rec.permission_mode ?? "auto",
       skills: rec.skills ?? [],
       slash_commands: rec.slash_commands ?? [],
       plugins: rec.plugins ?? [],
