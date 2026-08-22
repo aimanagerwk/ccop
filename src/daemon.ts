@@ -1,6 +1,6 @@
 /** One process owns live ClaudeSDKClient / query connections. */
 
-import { chmodSync, existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 import * as classify from "./classify.js";
 import { CLI_PATH, LOG_PATH, PERMISSION_TIMEOUT_S, PID_PATH, SOCK_PATH, ensureData } from "./paths.js";
@@ -635,6 +635,15 @@ function sleepReject(ms: number, message: string): Promise<never> {
   });
 }
 
+
+function logShutdown(reason: string): void {
+  try {
+    appendFileSync(LOG_PATH, `${new Date().toISOString()} shutdown ${reason}\n`);
+  } catch {
+    /* ignore */
+  }
+}
+
 export class Host {
   sessions: Record<string, Session> = {};
   shuttingDown = false;
@@ -1245,7 +1254,13 @@ export class Host {
     });
   }
 
-  async cmdShutdown(_req: Record<string, unknown>): Promise<Record<string, unknown>> {
+  async cmdShutdown(req: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const reason =
+      typeof req.reason === "string" && req.reason.trim()
+        ? req.reason.trim()
+        : "cmd=shutdown";
+    // cli `down` already writes cmd=down to daemon.log
+    if (reason !== "cmd=down") logShutdown(reason);
     for (const name of Object.keys(this.sessions)) {
       try {
         await this.teardown(name);
@@ -1389,7 +1404,6 @@ export async function serve(): Promise<void> {
   });
   writeFileSync(PID_PATH, String(process.pid) + "\n");
   chmodSync(SOCK_PATH, 0o600);
-  void LOG_PATH;
 
   let wsHandle: { close: () => Promise<void> } | null = null;
   const wsEnv = readWsEnv();
@@ -1404,7 +1418,7 @@ export async function serve(): Promise<void> {
     host.wsBind = { host: wsHandle.host, port: wsHandle.port };
   }
 
-  const stop = async () => {
+  const stop = async (reason: string) => {
     server.close();
     if (wsHandle) {
       try {
@@ -1413,7 +1427,7 @@ export async function serve(): Promise<void> {
         /* ignore */
       }
     }
-    await host.cmdShutdown({});
+    await host.cmdShutdown({ reason });
     try {
       unlinkSync(SOCK_PATH);
     } catch {
@@ -1421,10 +1435,10 @@ export async function serve(): Promise<void> {
     }
   };
   process.on("SIGTERM", () => {
-    void stop();
+    void stop("signal=SIGTERM");
   });
   process.on("SIGINT", () => {
-    void stop();
+    void stop("signal=SIGINT");
   });
 }
 

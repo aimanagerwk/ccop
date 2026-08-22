@@ -1,7 +1,7 @@
 /** npx tsx src/cli.ts — JSON-in/JSON-out operator CLI for the parent assistant. */
 
 import { spawn } from "node:child_process";
-import { existsSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -114,11 +114,20 @@ async function cmdUp(): Promise<void> {
   out({ ok: false, error: "daemon did not open socket" }, 1);
 }
 
+function logDown(why: string): void {
+  try {
+    appendFileSync(LOG_PATH, `${new Date().toISOString()} shutdown ${why}\n`);
+  } catch {
+    /* ignore */
+  }
+}
+
 async function cmdDown(): Promise<void> {
+  logDown("cmd=down");
   const { ping, sendReq } = await import("./ipc.js");
   if (await ping()) {
     try {
-      await sendReq({ cmd: "shutdown" }, 5);
+      await sendReq({ cmd: "shutdown", reason: "cmd=down" }, 5);
     } catch {
       /* ignore */
     }
