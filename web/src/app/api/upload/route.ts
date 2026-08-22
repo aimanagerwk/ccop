@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { NextResponse } from "next/server";
 import { getHub } from "../../../lib/bridge-singleton";
-import { resolveUnderCwd, uniqueDest } from "../../../lib/safe-path";
+import { resolveTempUpload, uniqueDest } from "../../../lib/safe-path";
 import type { SessionRow } from "../../../lib/protocol";
 
 export const dynamic = "force-dynamic";
@@ -47,19 +48,18 @@ export async function POST(req: Request): Promise<Response> {
   }
   const row = asSessions(status.sessions).find((s) => s.id === sessionId);
   if (!row) return NextResponse.json({ ok: false, error: "session not found" }, { status: 404 });
-  const cwd = typeof row.cwd === "string" ? row.cwd : "";
-  if (!cwd) return NextResponse.json({ ok: false, error: "session has no cwd" }, { status: 400 });
-  const dest0 = resolveUnderCwd(cwd, file.name || "upload.bin");
+  const dest0 = resolveTempUpload(sessionId, file.name || "upload.bin");
   if (!dest0) {
     return NextResponse.json({ ok: false, error: "path rejected" }, { status: 400 });
   }
   const dest = uniqueDest(dest0, existsSync);
   try {
+    await mkdir(path.dirname(dest), { recursive: true });
     const buf = Buffer.from(await file.arrayBuffer());
     await writeFile(dest, buf);
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ ok: false, error }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, path: dest, cwd, bytes: file.size });
+  return NextResponse.json({ ok: true, path: dest });
 }

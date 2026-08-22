@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { rpc } from "../lib/client";
+import { composeAttachMessage, uploadTempNote } from "../lib/upload-message";
 
 export function Composer(props: {
   id: string | null;
@@ -42,14 +43,15 @@ export function Composer(props: {
       setErr(String(res.error || "上传失败"));
       return;
     }
-    const line = `已写入文件: ${res.path}`;
-    const sent = await rpc("send", { id: props.id, text: line }, props.serverId);
+    const payload = composeAttachMessage(text, res.path);
+    const sent = await rpc("send", { id: props.id, text: payload }, props.serverId);
     setBusy(false);
     if (!sent.ok) {
       setErr(String(sent.error || "已落盘但通知失败"));
       return;
     }
-    setNote(line);
+    setNote(uploadTempNote(res.path));
+    setText("");
     if (fileRef.current) fileRef.current.value = "";
   }
 
