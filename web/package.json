@@ -1,0 +1,25 @@
+{
+  "name": "ccop-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx server.ts",
+    "build": "next build",
+    "start": "NODE_ENV=production tsx server.ts",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "^15.5.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0"
+  }
+}

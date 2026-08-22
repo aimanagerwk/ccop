@@ -12,3 +12,5 @@ data/events/
 
 # runtime (do not commit)
 data/
+web/.next/
+web/node_modules/
