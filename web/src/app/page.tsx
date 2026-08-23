@@ -6,6 +6,7 @@ import { PathTree, type TreeSel } from "../components/PathTree";
 import { PendingBar } from "../components/PendingBar";
 import { Toasts, type ToastItem } from "../components/Toasts";
 import { Transcript } from "../components/Transcript";
+import { WorkflowPanel } from "../components/WorkflowPanel";
 import { fetchHealth, postJson, rpc } from "../lib/client";
 import {
   emptyDepot,
@@ -37,6 +38,10 @@ export default function Page() {
   const [sessionsByServer, setSessionsByServer] = useState<Record<string, SessionRow[]>>({});
   const [sel, setSel] = useState<TreeSel>({ serverId: null, cwd: null, sessionId: null });
   const [events, setEvents] = useState<ClassifiedEvent[]>([]);
+  const [info, setInfo] = useState<Record<string, unknown> | null>(null);
+  const [tasks, setTasks] = useState<unknown>(null);
+  const [subagents, setSubagents] = useState<unknown>(null);
+  const [workflows, setWorkflows] = useState<Record<string, unknown> | null>(null);
   const [badges, setBadges] = useState<Record<string, number>>({});
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const selRef = useRef(sel);
@@ -68,6 +73,28 @@ export default function Page() {
     setEvents(asEvents(res.events));
   }, []);
 
+  const loadMonitor = useCallback(async (serverId: string, id: string) => {
+    const [infoRes, taskRes, subRes, wfRes] = await Promise.all([
+      rpc("info", { id }, serverId),
+      rpc("tasks", { id }, serverId),
+      rpc("subagents", { id }, serverId),
+      rpc("workflows", { id }, serverId),
+    ]);
+    const cur = selRef.current;
+    if (cur.serverId !== serverId || cur.sessionId !== id) return;
+    if (infoRes.ok) setInfo(infoRes);
+    if (taskRes.ok) setTasks(taskRes);
+    if (subRes.ok) setSubagents(subRes);
+    if (wfRes.ok) setWorkflows(wfRes);
+  }, []);
+
+  const clearMonitor = useCallback(() => {
+    setInfo(null);
+    setTasks(null);
+    setSubagents(null);
+    setWorkflows(null);
+  }, []);
+
   const onSelectSession = useCallback(
     (serverId: string, cwd: string | undefined, id: string) => {
       setSel({ serverId, cwd: cwd || null, sessionId: id });
@@ -77,8 +104,9 @@ export default function Page() {
         return next;
       });
       void loadEvents(serverId, id);
+      void loadMonitor(serverId, id);
     },
-    [loadEvents],
+    [loadEvents, loadMonitor],
   );
 
   const connectServer = useCallback(
@@ -130,9 +158,13 @@ export default function Page() {
 
   useEffect(() => {
     if (!anyLive) return;
-    const t = setInterval(() => void refreshAll(), 3000);
+    const t = setInterval(() => {
+      void refreshAll();
+      const cur = selRef.current;
+      if (cur.serverId && cur.sessionId) void loadMonitor(cur.serverId, cur.sessionId);
+    }, 3000);
     return () => clearInterval(t);
-  }, [anyLive, refreshAll]);
+  }, [anyLive, refreshAll, loadMonitor]);
 
   useEffect(() => {
     if (!anyLive) return;
@@ -161,11 +193,13 @@ export default function Page() {
       }
       if (same) {
         setEvents((xs) => [...xs, rec as ClassifiedEvent]);
+        const sid = selRef.current.serverId;
+        if (sid) void loadMonitor(sid, msg.id);
       }
       void refreshAll();
     };
     return () => es.close();
-  }, [anyLive, refreshAll]);
+  }, [anyLive, refreshAll, loadMonitor]);
 
   const current =
     (sel.serverId && (sessionsByServer[sel.serverId] || []).find((s) => s.id === sel.sessionId)) || null;
@@ -188,6 +222,7 @@ export default function Page() {
         onSelectServer={(id) => {
           setSel({ serverId: id, cwd: null, sessionId: null });
           setEvents([]);
+          clearMonitor();
           const s = depot.servers.find((x) => x.id === id);
           if (s && s.token && !live[id]) void connectServer(s);
           else void refreshOne(id);
@@ -195,6 +230,7 @@ export default function Page() {
         onSelectCwd={(serverId, cwd) => {
           setSel({ serverId, cwd, sessionId: null });
           setEvents([]);
+          clearMonitor();
         }}
         onSelectSession={onSelectSession}
         onSaveServer={(s) => {
@@ -210,6 +246,7 @@ export default function Page() {
           if (sel.serverId === id) {
             setSel({ serverId: null, cwd: null, sessionId: null });
             setEvents([]);
+            clearMonitor();
           }
         }}
         onPinCwd={(serverId, cwd) => persist(pinCwd(depot, serverId, cwd))}
@@ -229,6 +266,7 @@ export default function Page() {
           if (sel.sessionId === id) {
             setSel({ serverId, cwd: sel.cwd, sessionId: null });
             setEvents([]);
+            clearMonitor();
           }
         }}
       />
@@ -246,6 +284,14 @@ export default function Page() {
               serverId={sel.serverId}
               pending={current.pending || []}
               onDone={() => void refreshAll()}
+            />
+            <WorkflowPanel
+              session={current}
+              info={info}
+              tasks={tasks}
+              subagents={subagents}
+              workflows={workflows}
+              events={events}
             />
           </>
         ) : null}

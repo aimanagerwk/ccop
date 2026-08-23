@@ -232,4 +232,236 @@ describe("foldTranscript", () => {
       ]),
     ).toEqual([]);
   });
+
+  it("attaches PostToolUse tool_response onto the matching tool row", () => {
+    const events = [
+      ev({
+        kind: "working",
+        summary: "tool Bash",
+        extra: { tool: "Bash", tool_use_id: "tu_1", input: { command: "echo hi" } },
+        ts: 10,
+      }),
+      ev({
+        kind: "working",
+        summary: "PostToolUse",
+        extra: {
+          hook: "PostToolUse",
+          tool_name: "Bash",
+          tool_use_id: "tu_1",
+          tool_response: { stdout: "hi\n", stderr: "", interrupted: false },
+        },
+        ts: 11,
+      }),
+    ];
+    expect(foldTranscript(events)).toEqual([
+      {
+        type: "tool",
+        name: "Bash",
+        detail: "echo hi",
+        input: { command: "echo hi" },
+        tool_use_id: "tu_1",
+        output: { stdout: "hi\n", stderr: "", interrupted: false },
+        ts: 10,
+      },
+    ]);
+  });
+
+  it("attaches parallel PostToolUse results only by tool_use_id", () => {
+    const events = [
+      ev({
+        kind: "working",
+        summary: "tool Read",
+        extra: { tool: "Read", tool_use_id: "a", input: { file_path: "/a.ts" } },
+      }),
+      ev({
+        kind: "working",
+        summary: "tool Read",
+        extra: { tool: "Read", tool_use_id: "b", input: { file_path: "/b.ts" } },
+      }),
+      ev({
+        kind: "working",
+        summary: "PostToolUse",
+        extra: { tool_use_id: "b", tool_response: { type: "text", file: { content: "B" } } },
+      }),
+      ev({
+        kind: "working",
+        summary: "PostToolUse",
+        extra: { tool_use_id: "a", tool_response: { type: "text", file: { content: "A" } } },
+      }),
+    ];
+    const rows = foldTranscript(events);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ type: "tool", tool_use_id: "a", output: { type: "text", file: { content: "A" } } });
+    expect(rows[1]).toMatchObject({ type: "tool", tool_use_id: "b", output: { type: "text", file: { content: "B" } } });
+  });
+
+  it("does not attach mismatched or empty tool_use_id", () => {
+    const events = [
+      ev({
+        kind: "working",
+        summary: "tool Bash",
+        extra: { tool: "Bash", tool_use_id: "keep", input: { command: "ls" } },
+      }),
+      ev({
+        kind: "working",
+        summary: "PostToolUse",
+        extra: { tool_use_id: "other", tool_response: { stdout: "nope" } },
+      }),
+      ev({
+        kind: "working",
+        summary: "PostToolUse",
+        extra: { tool_response: { stdout: "latest?" } },
+      }),
+      ev({
+        kind: "working",
+        summary: "PostToolUse",
+        extra: { tool_use_id: "", tool_response: { stdout: "empty-id" } },
+      }),
+    ];
+    expect(foldTranscript(events)).toEqual([
+      { type: "tool", name: "Bash", detail: "ls", input: { command: "ls" }, tool_use_id: "keep" },
+    ]);
+  });
+
+  it("attaches PostToolUseFailure error without a second tool row", () => {
+    const events = [
+      ev({
+        kind: "working",
+        summary: "tool Write",
+        extra: { tool: "Write", tool_use_id: "w1", input: { file_path: "/a.ts" } },
+      }),
+      ev({
+        kind: "working",
+        summary: "PostToolUseFailure Write",
+        extra: { hook: "PostToolUseFailure", tool_name: "Write", tool_use_id: "w1", error: "EACCES" },
+      }),
+    ];
+    expect(foldTranscript(events)).toEqual([
+      {
+        type: "tool",
+        name: "Write",
+        detail: "/a.ts",
+        input: { file_path: "/a.ts" },
+        tool_use_id: "w1",
+        output: "EACCES",
+        is_error: true,
+      },
+    ]);
+  });
+
+  it("attaches user tool_result content / tool_use_result by id", () => {
+    const events = [
+      ev({
+        kind: "working",
+        summary: "tool Bash",
+        extra: { tool: "Bash", tool_use_id: "u1", input: { command: "pwd" } },
+      }),
+      ev({
+        kind: "working",
+        summary: "tool_result",
+        extra: { tool_use_id: "u1", content: "denied", is_error: true },
+      }),
+    ];
+    expect(foldTranscript(events)).toEqual([
+      {
+        type: "tool",
+        name: "Bash",
+        detail: "pwd",
+        input: { command: "pwd" },
+        tool_use_id: "u1",
+        output: "denied",
+        is_error: true,
+      },
+    ]);
+  });
+
+  it("prefers tool_response over tool_use_result over content over error", () => {
+    const events = [
+      ev({
+        kind: "working",
+        summary: "tool Read",
+        extra: { tool: "Read", tool_use_id: "p1", input: { file_path: "/x" } },
+      }),
+      ev({
+        kind: "working",
+        summary: "PostToolUse",
+        extra: {
+          tool_use_id: "p1",
+          tool_response: { ok: 1 },
+          tool_use_result: { ok: 2 },
+          content: "text",
+          error: "err",
+        },
+      }),
+    ];
+    expect(foldTranscript(events)[0]).toMatchObject({ output: { ok: 1 } });
+  });
+
+  it("does not mutate input events when attaching output", () => {
+    const events = [
+      ev({
+        kind: "working",
+        summary: "tool Bash",
+        extra: { tool: "Bash", tool_use_id: "m1", input: { command: "echo" } },
+        ts: 1,
+      }),
+      ev({
+        kind: "working",
+        summary: "PostToolUse",
+        extra: { tool_use_id: "m1", tool_response: { stdout: "x" } },
+        ts: 2,
+      }),
+    ];
+    const copy = JSON.parse(JSON.stringify(events));
+    foldTranscript(events);
+    expect(events).toEqual(copy);
+    expect(events[0].extra).not.toHaveProperty("output");
+    expect(events[0].extra).not.toHaveProperty("tool_response");
+  });
+
+  it("keeps the tool-use timestamp, not the PostToolUse timestamp", () => {
+    const rows = foldTranscript([
+      ev({
+        kind: "working",
+        summary: "tool Read",
+        extra: { tool: "Read", tool_use_id: "t1", input: { file_path: "/a.ts" } },
+        ts: 40,
+      }),
+      ev({
+        kind: "working",
+        summary: "PostToolUse",
+        extra: { tool_use_id: "t1", tool_response: { type: "text", file: { content: "z" } } },
+        ts: 99,
+      }),
+    ]);
+    expect(rows).toEqual([
+      {
+        type: "tool",
+        name: "Read",
+        detail: "a.ts",
+        input: { file_path: "/a.ts" },
+        tool_use_id: "t1",
+        output: { type: "text", file: { content: "z" } },
+        ts: 40,
+      },
+    ]);
+  });
+});
+
+describe("toolCardPresentation", () => {
+  it("opens when input has keys, output is present, or both; closed when neither", async () => {
+    const { toolCardPresentation } = await import("../web/src/lib/fold-transcript.js");
+    expect(toolCardPresentation({ command: "ls" }, undefined).open).toBe(true);
+    expect(toolCardPresentation({}, "stdout").open).toBe(true);
+    expect(toolCardPresentation({ command: "ls" }, { stdout: "x" }).open).toBe(true);
+    expect(toolCardPresentation({}, undefined).open).toBe(false);
+    expect(toolCardPresentation({}, null).open).toBe(false);
+  });
+
+  it("formats string output as text and objects as JSON", async () => {
+    const { toolCardPresentation } = await import("../web/src/lib/fold-transcript.js");
+    expect(toolCardPresentation({}, "plain").outputText).toBe("plain");
+    expect(toolCardPresentation({}, { stdout: "x" }).outputText).toBe(JSON.stringify({ stdout: "x" }, null, 2));
+    expect(toolCardPresentation({ a: 1 }, undefined).inputText).toBe(JSON.stringify({ a: 1 }, null, 2));
+  });
 });

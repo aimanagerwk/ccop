@@ -115,22 +115,33 @@ export function fromHeld(): Event[] {
   return [ev("held", "lock=operator", {})];
 }
 
+function own(obj: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
 export function fromHook(hookEventName: string, payload?: Record<string, unknown> | null): Event[] {
   const p = payload || {};
   const name = hookEventName;
   const extra: Record<string, unknown> = { hook: name };
-  if ("tool_name" in p) extra.tool_name = p.tool_name;
-  if ("tool_use_id" in p) extra.tool_use_id = p.tool_use_id;
-  if ("agent_id" in p || "agentId" in p) extra.agent_id = p.agent_id ?? p.agentId;
-  if ("agent_type" in p || "agentType" in p) extra.agent_type = p.agent_type ?? p.agentType;
+  if (own(p, "tool_name")) extra.tool_name = p.tool_name;
+  if (own(p, "tool_use_id")) extra.tool_use_id = p.tool_use_id;
+  if (own(p, "agent_id")) extra.agent_id = p.agent_id;
+  else if (own(p, "agentId")) extra.agent_id = p.agentId;
+  if (own(p, "agent_type")) extra.agent_type = p.agent_type;
+  else if (own(p, "agentType")) extra.agent_type = p.agentType;
+  if (own(p, "tool_response")) extra.tool_response = p.tool_response;
+  if (own(p, "error")) extra.error = p.error;
+  if (own(p, "is_interrupt")) extra.is_interrupt = p.is_interrupt;
+  if (own(p, "duration_ms")) extra.duration_ms = p.duration_ms;
   if (name === "PermissionRequest") {
     return fromPermissionRequest({
-      tool_name: String(p.tool_name || ""),
-      tool_use_id: String(p.tool_use_id || ""),
+      tool_name: String(own(p, "tool_name") ? p.tool_name : ""),
+      tool_use_id: String(own(p, "tool_use_id") ? p.tool_use_id : ""),
     });
   }
   if (name === "PostToolUseFailure") {
-    return [ev("working", `PostToolUseFailure ${p.tool_name || ""}`, extra)];
+    const failedTool = own(p, "tool_name") ? p.tool_name : "";
+    return [ev("working", `PostToolUseFailure ${failedTool || ""}`, extra)];
   }
   if (name === "PreToolUse" || name === "PostToolUse" || name === "SubagentStart" || name === "Notification") {
     return [ev("working", name, extra)];

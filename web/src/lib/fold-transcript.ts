@@ -6,20 +6,30 @@ export type FoldEvent = {
   kind: string;
   summary: string;
   extra?: Record<string, unknown> | null;
+  ts?: number;
 };
 
 export type FoldedRow =
-  | { type: "thinking"; n: number }
-  | { type: "thinking_text"; text: string }
-  | { type: "user"; text: string }
-  | { type: "assistant"; text: string }
-  | { type: "tool"; name: string; detail: string; input: Record<string, unknown> }
-  | { type: "needs_decision"; text: string }
-  | { type: "needs_info"; text: string }
-  | { type: "failed"; text: string }
-  | { type: "dead"; text: string }
-  | { type: "task_done"; text: string }
-  | { type: "system"; items: string[] };
+  | { type: "thinking"; n: number; ts?: number }
+  | { type: "thinking_text"; text: string; ts?: number }
+  | { type: "user"; text: string; ts?: number }
+  | { type: "assistant"; text: string; ts?: number }
+  | {
+      type: "tool";
+      name: string;
+      detail: string;
+      input: Record<string, unknown>;
+      tool_use_id?: string;
+      output?: unknown;
+      is_error?: boolean;
+      ts?: number;
+    }
+  | { type: "needs_decision"; text: string; ts?: number }
+  | { type: "needs_info"; text: string; ts?: number }
+  | { type: "failed"; text: string; ts?: number }
+  | { type: "dead"; text: string; ts?: number }
+  | { type: "task_done"; text: string; ts?: number }
+  | { type: "system"; items: string[]; ts?: number };
 
 const PLACEHOLDER = new Set([
   "assistant",
@@ -43,7 +53,7 @@ const HIDE_SUMMARIES = new Set([
 
 const HIDE_KINDS = new Set(["idle", "held", "interrupted"]);
 
-const SILENT_SUMMARIES = new Set(["PreToolUse", "PostToolUse", "Stop hook", "Stop", "Object"]);
+const SILENT_SUMMARIES = new Set(["PreToolUse", "PostToolUse", "Stop hook", "Stop", "Object", "tool_result"]);
 
 const SYSTEM_LABEL: Record<string, string> = {
   connected: "已连接",
@@ -70,6 +80,18 @@ const SYSTEM_LABEL: Record<string, string> = {
 
 function extraOf(e: FoldEvent): Record<string, unknown> {
   return e.extra && typeof e.extra === "object" && !Array.isArray(e.extra) ? e.extra : {};
+}
+
+function own(obj: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+function tsOf(e: FoldEvent): number | undefined {
+  return typeof e.ts === "number" && Number.isFinite(e.ts) ? e.ts : undefined;
+}
+
+function withTs<T extends object>(row: T, ts?: number): T {
+  return ts === undefined ? row : { ...row, ts };
 }
 
 function extraStr(extra: Record<string, unknown>, keys: string[]): string | undefined {
@@ -175,9 +197,120 @@ export function toolDetail(name: string, input: Record<string, unknown>): string
   return "";
 }
 
+function toolUseIdOf(extra: Record<string, unknown>): string {
+  if (!own(extra, "tool_use_id")) return "";
+  return typeof extra.tool_use_id === "string" ? extra.tool_use_id.trim() : "";
+}
+
+function hasAttachableOutput(extra: Record<string, unknown>): boolean {
+  return own(extra, "tool_response") || own(extra, "tool_use_result") || own(extra, "content") || own(extra, "error");
+}
+
+function pickAttachedOutput(extra: Record<string, unknown>): unknown {
+  if (own(extra, "tool_response")) return extra.tool_response;
+  if (own(extra, "tool_use_result")) return extra.tool_use_result;
+  if (own(extra, "content")) return extra.content;
+  return extra.error;
+}
+
+function tryAttachToolOutput(
+  e: FoldEvent,
+  toolsById: Map<string, Extract<FoldedRow, { type: "tool" }>>,
+): boolean {
+  const extra = extraOf(e);
+  if (!hasAttachableOutput(extra)) return false;
+  const id = toolUseIdOf(extra);
+  if (id) {
+    const row = toolsById.get(id);
+    if (row) {
+      row.output = pickAttachedOutput(extra);
+      if ((own(extra, "error") && extra.error !== undefined) || (own(extra, "is_error") && extra.is_error === true)) {
+        row.is_error = true;
+      }
+    }
+  }
+  return true;
+}
+
 function toolRow(name: string, e: FoldEvent): Extract<FoldedRow, { type: "tool" }> {
   const input = inputOf(e);
-  return { type: "tool", name, detail: toolDetail(name, input), input };
+  const id = toolUseIdOf(extraOf(e));
+  return withTs(
+    { type: "tool", name, detail: toolDetail(name, input), input, ...(id ? { tool_use_id: id } : {}) },
+    tsOf(e),
+  );
+}
+
+const TOOL_OUTPUT_CLIP = 64_000;
+
+function clipToolText(text: string, max = TOOL_OUTPUT_CLIP): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(1, max - 1))}…`;
+}
+
+function isNonTextBlock(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const t = (value as Record<string, unknown>).type;
+  return t === "image" || t === "document" || t === "audio" || t === "video" || t === "base64";
+}
+
+function sanitizeToolOutput(value: unknown, depth = 0): unknown {
+  if (typeof value === "string") return clipToolText(value);
+  if (value === null || value === undefined || typeof value !== "object") return value;
+  if (depth > 8) return "[omitted]";
+  if (Array.isArray(value)) {
+    return value.map((item) => {
+      if (isNonTextBlock(item)) {
+        return { type: item.type, omitted: true };
+      }
+      return sanitizeToolOutput(item, depth + 1);
+    });
+  }
+  const rec = value as Record<string, unknown>;
+  if (isNonTextBlock(rec)) return { type: rec.type, omitted: true };
+  const out: Record<string, unknown> = Object.create(null);
+  for (const [k, v] of Object.entries(rec)) {
+    if (k === "__proto__" || k === "constructor" || k === "prototype") continue;
+    if ((k === "data" || k === "source") && typeof v === "string" && v.length > 256) {
+      out[k] = "[omitted]";
+      continue;
+    }
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const inner = v as Record<string, unknown>;
+      if (inner.type === "base64" || typeof inner.data === "string") {
+        out[k] = {
+          type: inner.type,
+          media_type: inner.media_type,
+          omitted: true,
+        };
+        continue;
+      }
+    }
+    out[k] = sanitizeToolOutput(v, depth + 1);
+  }
+  return out;
+}
+
+function formatClippedToolOutput(output: unknown): string {
+  if (typeof output === "string") return clipToolText(output);
+  try {
+    return clipToolText(JSON.stringify(sanitizeToolOutput(output), null, 2));
+  } catch {
+    return clipToolText(String(output));
+  }
+}
+
+export function toolCardPresentation(
+  input: Record<string, unknown>,
+  output?: unknown | null,
+): { open: boolean; inputText: string; outputText: string } {
+  const hasInput = Object.keys(input).length > 0;
+  const hasOutput = output !== undefined && output !== null;
+  return {
+    open: hasInput || hasOutput,
+    inputText: JSON.stringify(input, null, 2),
+    outputText: hasOutput ? formatClippedToolOutput(output) : "",
+  };
 }
 
 function isNoise(e: FoldEvent): boolean {
@@ -215,6 +348,7 @@ export function decisionLabel(e: FoldEvent): string {
 
 export function foldTranscript(events: readonly FoldEvent[]): FoldedRow[] {
   const rows: FoldedRow[] = [];
+  const toolsById = new Map<string, Extract<FoldedRow, { type: "tool" }>>();
   let i = 0;
   while (i < events.length) {
     const e = events[i];
@@ -222,25 +356,26 @@ export function foldTranscript(events: readonly FoldEvent[]): FoldedRow[] {
     if (isThinkingTick(e)) {
       let count = 0;
       let token: number | undefined;
+      const firstTs = tsOf(e);
       while (i < events.length && isThinkingTick(events[i])) {
         count += 1;
         const n = extraNum(extraOf(events[i]));
         if (n !== undefined) token = n;
         i += 1;
       }
-      rows.push({ type: "thinking", n: token ?? count });
+      rows.push(withTs({ type: "thinking", n: token ?? count }, firstTs));
       continue;
     }
 
     const think = thinkingText(e);
     if (think) {
-      rows.push({ type: "thinking_text", text: think });
+      rows.push(withTs({ type: "thinking_text", text: think }, tsOf(e)));
       i += 1;
       continue;
     }
 
     if (e.kind === "sent") {
-      rows.push({ type: "user", text: e.summary || extraStr(extraOf(e), ["text"]) || "" });
+      rows.push(withTs({ type: "user", text: e.summary || extraStr(extraOf(e), ["text"]) || "" }, tsOf(e)));
       i += 1;
       continue;
     }
@@ -250,57 +385,71 @@ export function foldTranscript(events: readonly FoldEvent[]): FoldedRow[] {
         e.kind === "needs_decision"
           ? decisionLabel(e)
           : visibleText(e, ["result", "text", "error"]) || e.summary;
-      rows.push({ type: e.kind, text });
+      rows.push(withTs({ type: e.kind, text }, tsOf(e)));
       i += 1;
       continue;
     }
 
     if (e.kind === "task_done") {
-      rows.push({ type: "task_done", text: visibleText(e, ["result", "text", "summary"]) || e.summary });
+      rows.push(withTs({ type: "task_done", text: visibleText(e, ["result", "text", "summary"]) || e.summary }, tsOf(e)));
       i += 1;
       continue;
     }
 
     if (e.kind === "turn_done") {
       const text = extraStr(extraOf(e), ["result", "text"]) || (isPlaceholderSummary(e.summary) ? "" : e.summary);
-      if (text) rows.push({ type: "assistant", text });
+      if (text) rows.push(withTs({ type: "assistant", text }, tsOf(e)));
       i += 1;
       continue;
     }
 
     const tool = toolName(e);
     if (tool) {
-      rows.push(toolRow(tool, e));
+      const row = toolRow(tool, e);
+      rows.push(row);
+      if (row.tool_use_id) toolsById.set(row.tool_use_id, row);
+      i += 1;
+      continue;
+    }
+
+    if (tryAttachToolOutput(e, toolsById)) {
       i += 1;
       continue;
     }
 
     if (isNoise(e)) {
       const items: string[] = [];
+      const firstTs = tsOf(e);
       while (i < events.length && isNoise(events[i]) && !isThinkingTick(events[i]) && !thinkingText(events[i])) {
+        if (tryAttachToolOutput(events[i], toolsById)) {
+          i += 1;
+          continue;
+        }
         if (!isSilent(events[i])) items.push(systemLabel(events[i]));
         i += 1;
       }
-      if (items.length) rows.push({ type: "system", items });
+      if (items.length) rows.push(withTs({ type: "system", items }, firstTs));
       continue;
     }
 
     const extra = extraOf(e);
     const prose = extraStr(extra, ["result", "text"]) || (!isPlaceholderSummary(e.summary) ? e.summary : "");
     if (prose) {
-      rows.push({ type: "assistant", text: prose });
+      rows.push(withTs({ type: "assistant", text: prose }, tsOf(e)));
       i += 1;
       continue;
     }
 
     const hookTool = hookToolName(e);
     if (hookTool) {
-      rows.push(toolRow(hookTool, e));
+      const row = toolRow(hookTool, e);
+      rows.push(row);
+      if (row.tool_use_id) toolsById.set(row.tool_use_id, row);
       i += 1;
       continue;
     }
 
-    rows.push({ type: "system", items: [systemLabel(e)] });
+    rows.push(withTs({ type: "system", items: [systemLabel(e)] }, tsOf(e)));
     i += 1;
   }
   return rows;

@@ -245,7 +245,7 @@ async function openLiveClient(options: Record<string, unknown>, firstPrompt: str
   };
 }
 
-class Session {
+export class Session {
   /** Claude session UUID — the only lookup key. */
   id: string;
   /** Optional operator label (--name). Display only. */
@@ -581,6 +581,13 @@ class Session {
               })),
             },
           }]);
+        } else if (subtype === "thinking_tokens" || type === "thinking_tokens") {
+          const extraThink: Record<string, unknown> = { type: typeName || type };
+          const estimated = m.estimated_tokens ?? m.estimatedTokens;
+          const delta = m.estimated_tokens_delta ?? m.estimatedTokensDelta;
+          if (typeof estimated === "number" && Number.isFinite(estimated)) extraThink.estimated_tokens = estimated;
+          if (typeof delta === "number" && Number.isFinite(delta)) extraThink.estimated_tokens_delta = delta;
+          this.emit([{ kind: "working", summary: "thinking_tokens", extra: extraThink }]);
         } else if (m?.type === "assistant" || typeName === "AssistantMessage") {
           const blocks = m.message?.content || m.content || [];
           for (const block of blocks) {
@@ -602,6 +609,35 @@ class Session {
                 },
               ]);
             }
+          }
+        } else if (type === "user" || typeName === "UserMessage") {
+          const raw = m.message?.content ?? m.content;
+          const blocks = Array.isArray(raw) ? raw : [];
+          const results: classify.Event[] = [];
+          for (const block of blocks) {
+            const btype = block?.type || block?.constructor?.name;
+            if (btype !== "tool_result" && btype !== "ToolResultBlock") continue;
+            const extra: Record<string, unknown> = {
+              tool_use_id: Object.prototype.hasOwnProperty.call(block, "tool_use_id")
+                ? block.tool_use_id || ""
+                : Object.prototype.hasOwnProperty.call(block, "toolUseId")
+                  ? block.toolUseId || ""
+                  : "",
+            };
+            if (Object.prototype.hasOwnProperty.call(block, "content")) extra.content = block.content;
+            if (block.is_error === true || block.isError === true) extra.is_error = true;
+            if (Object.prototype.hasOwnProperty.call(m, "tool_use_result")) extra.tool_use_result = m.tool_use_result;
+            results.push({ kind: "working", summary: "tool_result", extra });
+          }
+          if (results.length) this.emit(results);
+          else {
+            this.emit([
+              {
+                kind: "working",
+                summary: String(type || typeName || "user"),
+                extra: { type: typeName || type },
+              },
+            ]);
           }
         } else {
           const label = subtype || typeName || type || "message";
