@@ -1,9 +1,13 @@
 "use client";
 
-import { memo, useMemo, type ReactNode } from "react";
+import { memo, useCallback, useMemo, useState, type ReactNode, type UIEvent } from "react";
 import type { ClassifiedEvent } from "../lib/protocol";
 import { foldTranscript, toolCardPresentation, type FoldedRow } from "../lib/fold-transcript";
+import { flattenTimeline, groupTurns, type TimelineItem } from "../lib/timeline-turn";
+import { filterGroups } from "../lib/timeline-filter";
+import { DEFAULT_ROW_HEIGHT, virtualWindow, visibleSlice } from "../lib/timeline-virtual";
 import { parseMdLite } from "../lib/md-lite";
+import { formatDateTimeAttr } from "../lib/format-ts";
 import { formatClock } from "../lib/workflow-monitor";
 
 const MdBody = memo(function MdBody(props: { text: string }) {
@@ -147,7 +151,7 @@ function Item(props: { row: FoldedRow }) {
 
   return (
     <div className={`tl-item ${tone}`}>
-      <time className="tl-time" dateTime={row.ts != null ? String(row.ts) : undefined}>
+      <time className="tl-time" dateTime={formatDateTimeAttr(row.ts)}>
         {clock}
       </time>
       <div className="tl-rail" aria-hidden>
@@ -158,16 +162,92 @@ function Item(props: { row: FoldedRow }) {
   );
 }
 
+function DayHead(props: { label: string }) {
+  return (
+    <div className="tl-day">
+      <div className="tl-time" />
+      <div className="tl-rail" aria-hidden>
+        <span className="tl-dot" />
+      </div>
+      <div className="tl-body">{props.label}</div>
+    </div>
+  );
+}
+
+function TurnHead(props: { turnId: number }) {
+  const label = props.turnId === 0 ? "开始前" : `回合 ${props.turnId}`;
+  return (
+    <div className="tl-turn-head">
+      <div className="tl-time" />
+      <div className="tl-rail" aria-hidden>
+        <span className="tl-dot" />
+      </div>
+      <div className="tl-body">{label}</div>
+    </div>
+  );
+}
+
+function renderItem(item: TimelineItem, i: number) {
+  if (item.kind === "day") return <DayHead key={`d-${item.dayKey}-${i}`} label={item.label} />;
+  if (item.kind === "turn-head") {
+    return <TurnHead key={`t-${item.turnId}-${i}`} turnId={item.turnId} />;
+  }
+  return <Item key={`r-${item.turnId}-${i}`} row={item.row} />;
+}
+
 export function Transcript(props: { events: ClassifiedEvent[] }) {
-  const rows = useMemo(() => foldTranscript(props.events), [props.events]);
+  const [q, setQ] = useState("");
+  const [scroll, setScroll] = useState({ scrollTop: 0, viewportHeight: 0 });
+  const items = useMemo(() => {
+    const rows = foldTranscript(props.events);
+    return flattenTimeline(filterGroups(groupTurns(rows), { q }));
+  }, [props.events, q]);
+  const win = useMemo(
+    () =>
+      virtualWindow({
+        scrollTop: scroll.scrollTop,
+        viewportHeight: scroll.viewportHeight > 0 ? scroll.viewportHeight : 800,
+        rowHeight: DEFAULT_ROW_HEIGHT,
+        count: items.length,
+      }),
+    [scroll.scrollTop, scroll.viewportHeight, items.length],
+  );
+  const visible = useMemo(() => visibleSlice(items, win), [items, win]);
+  const onScroll = useCallback((e: UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    setScroll({ scrollTop: el.scrollTop, viewportHeight: el.clientHeight });
+  }, []);
+  const onListRef = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return;
+    setScroll((prev) => {
+      if (prev.viewportHeight === el.clientHeight && prev.scrollTop === el.scrollTop) return prev;
+      return { scrollTop: el.scrollTop, viewportHeight: el.clientHeight };
+    });
+  }, []);
   if (!props.events.length) {
     return <div className="transcript tiny">还没有记录。从左侧新建会话，或选择一个已有会话。</div>;
   }
   return (
-    <div className="transcript timeline" role="list">
-      {rows.map((row, i) => (
-        <Item key={i} row={row} />
-      ))}
+    <div className="transcript timeline">
+      <input
+        className="tl-search"
+        type="search"
+        value={q}
+        placeholder="过滤时间线"
+        onChange={(e) => setQ(e.target.value)}
+        aria-label="过滤时间线"
+      />
+      <div className="tl-list" role="list" onScroll={onScroll} ref={onListRef}>
+        {items.length ? (
+          <div className="tl-virt" style={{ height: win.totalHeight }}>
+            <div className="tl-virt-window" style={{ transform: `translateY(${win.offsetTop}px)` }}>
+              {visible.map((item, i) => renderItem(item, win.start + i))}
+            </div>
+          </div>
+        ) : (
+          <div className="tl-empty">没有匹配的记录</div>
+        )}
+      </div>
     </div>
   );
 }
