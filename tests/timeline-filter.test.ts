@@ -49,6 +49,19 @@ describe("sanitizeQuery", () => {
     expect(filterRows([{ type: "user", text: q }], { q }).length).toBe(1);
   });
 
+  it("a lone regional indicator after a full budget cannot match every flag", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const letter = "\u{1F1E8}";
+    const q = `${"x".repeat(199)}${letter}`;
+    const needle = sanitizeQuery({ q }).needle;
+    expect(needle.endsWith(letter)).toBe(false);
+    expect(haystackHas(china, letter)).toBe(false);
+    expect(haystackHas(canada, letter)).toBe(false);
+    expect(filterRows([{ type: "user", text: china }], { q })).toEqual([]);
+    expect(filterRows([{ type: "user", text: canada }], { q })).toEqual([]);
+  });
+
   it("keeps ZWJ inside a family emoji so the original row matches", () => {
     const family = "\u{1F468}‍\u{1F469}‍\u{1F467}";
     const q = `${"x".repeat(190)}${family}`;
@@ -67,7 +80,7 @@ describe("sanitizeQuery", () => {
     expect(needle).not.toBe("");
     expect(needle.includes(china)).toBe(true);
     expect(needle.includes("\u{1F1E8}") && !needle.includes(china)).toBe(false);
-    expect(haystackHas(canada, "\u{1F1E8}")).toBe(true);
+    expect(haystackHas(canada, "\u{1F1E8}")).toBe(false);
     expect(haystackHas(canada, needle)).toBe(false);
     const paddedCanada = `${"x".repeat(198)}${canada}`;
     expect(haystackHas(paddedCanada, needle)).toBe(false);

@@ -161,6 +161,13 @@ function stripFillers(s: string): string {
   return out;
 }
 
+function isUnpairedRegionalGrapheme(s: string, start: number, end: number): boolean {
+  const first = codePointAt(s, start);
+  if (first === undefined || !isRegionalIndicator(first)) return false;
+  const second = codePointAt(s, start + codePointWidth(first));
+  return second === undefined || !isRegionalIndicator(second) || start + codePointWidth(first) + codePointWidth(second) > end;
+}
+
 /** NFC + strip fillers + trim, then clip on grapheme / word bounds. */
 function normalizeNeedle(q: string): string {
   const s = stripFillers(q.normalize("NFC")).trim();
@@ -169,7 +176,10 @@ function normalizeNeedle(q: string): string {
   while (end < s.length) {
     const next = graphemeEnd(s, end);
     if (next > QUERY_MAX_LEN && end > 0) {
-      end = next;
+      // Keep a complete flag/emoji that sits just past the budget.
+      // A lone regional indicator is not a flag — drop it so it cannot
+      // includes-match every other flag that shares that letter.
+      if (!isUnpairedRegionalGrapheme(s, end, next)) end = next;
       break;
     }
     end = next;
@@ -270,9 +280,27 @@ export function sanitizeQuery(raw: FilterQuery | unknown): SanitizedQuery {
   return { needle, types };
 }
 
+function hasUnpairedRegionalIndicator(s: string): boolean {
+  let i = 0;
+  let pending = false;
+  while (i < s.length) {
+    const cp = codePointAt(s, i);
+    if (cp === undefined) break;
+    const w = codePointWidth(cp);
+    if (isRegionalIndicator(cp)) {
+      pending = !pending;
+    } else if (pending) {
+      return true;
+    }
+    i += w;
+  }
+  return pending;
+}
+
 export function haystackHas(haystack: string, needle: string): boolean {
   if (needle === "") return true;
   if (typeof haystack !== "string") return false;
+  if (hasUnpairedRegionalIndicator(needle)) return false;
   return haystack.toLowerCase().includes(needle.toLowerCase());
 }
 

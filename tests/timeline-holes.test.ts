@@ -96,11 +96,27 @@ describe("holes / unit", () => {
     expect(needle).not.toBe("");
     expect(needle.includes(china) || needle.endsWith(china)).toBe(true);
     expect(needle.includes("\u{1F1E8}") && !needle.includes(china)).toBe(false);
-    expect(haystackHas(canada, "\u{1F1E8}")).toBe(true);
+    expect(haystackHas(canada, "\u{1F1E8}")).toBe(false);
     expect(haystackHas(canada, needle)).toBe(false);
     expect(filterRows([{ type: "user", text: canada }], { q })).toEqual([]);
     expect(filterRows([{ type: "user", text: q }], { q }).length).toBe(1);
     expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
+  it("a budget-filling prefix plus a lone regional indicator cannot match any flag", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const letter = "\u{1F1E8}";
+    const q = `${"x".repeat(199)}${letter}`;
+    const { needle } = sanitizeQuery({ q });
+    expect(needle.endsWith(letter)).toBe(false);
+    expect(haystackHas(china, letter)).toBe(false);
+    expect(haystackHas(canada, letter)).toBe(false);
+    expect(haystackHas(china, needle)).toBe(false);
+    expect(haystackHas(canada, needle)).toBe(false);
+    expect(filterRows([{ type: "user", text: china }], { q })).toEqual([]);
+    expect(filterRows([{ type: "user", text: canada }], { q })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: letter })).toEqual([]);
   });
 
   it("sanitizeQuery strips soft hyphens before clipping so the trailing word survives", () => {
@@ -243,7 +259,7 @@ describe("holes / unit", () => {
     expect(needle.includes(china)).toBe(true);
     expect(needle.endsWith(china)).toBe(true);
     expect(needle.includes("\u{1F1E8}") && !needle.includes(china)).toBe(false);
-    expect(haystackHas(canada, "\u{1F1E8}")).toBe(true);
+    expect(haystackHas(canada, "\u{1F1E8}")).toBe(false);
     expect(haystackHas(canada, needle)).toBe(false);
     const paddedCanada = `${"x".repeat(198)}${canada}`;
     expect(haystackHas(paddedCanada, needle)).toBe(false);
@@ -363,7 +379,7 @@ describe("holes / security", () => {
     const s = sanitizeQuery({ q });
     expect(s.needle).not.toBe("");
     expect(s.needle.includes(china)).toBe(true);
-    expect(haystackHas(canada, "\u{1F1E8}")).toBe(true);
+    expect(haystackHas(canada, "\u{1F1E8}")).toBe(false);
     expect(haystackHas(canada, s.needle)).toBe(false);
     expect(filterRows([{ type: "user", text: canada }], { q })).toEqual([]);
     expect(filterRows([{ type: "user", text: q }], { q }).length).toBe(1);
@@ -547,7 +563,7 @@ describe("holes / security", () => {
     expect(s.needle).not.toBe("");
     expect(s.needle.includes(china)).toBe(true);
     expect(s.needle.includes("\u{1F1E8}") && !s.needle.includes(china)).toBe(false);
-    expect(haystackHas(canada, "\u{1F1E8}")).toBe(true);
+    expect(haystackHas(canada, "\u{1F1E8}")).toBe(false);
     expect(haystackHas(canada, s.needle)).toBe(false);
     const paddedCanada = `${"x".repeat(198)}${canada}`;
     expect(haystackHas(paddedCanada, s.needle)).toBe(false);
@@ -832,6 +848,11 @@ describe("holes / integration", () => {
         g.rows.some((r) => r.type === "user" && r.text === paddedCanada),
       ),
     ).toBe(false);
+    const letter = "\u{1F1E8}";
+    const half = `${"x".repeat(199)}${letter}`;
+    expect(sanitizeQuery({ q: half }).needle.endsWith(letter)).toBe(false);
+    expect(filterGroups(groups, { q: half })).toEqual([]);
+    expect(filterGroups(groups, { q: letter })).toEqual([]);
     const filtered = filterGroups(groups, { q: china });
     expect(filtered).toHaveLength(1);
     expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(china))).toBe(true);

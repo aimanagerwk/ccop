@@ -136,6 +136,20 @@ describe("fold then groupTurns then filterGroups", () => {
     expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(canada))).toBe(false);
   });
 
+  it("a lone regional indicator after a full budget does not select every flag turn", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const letter = "\u{1F1E8}";
+    const s1 = classify.fromSent({ text: `visit ${canada}` })[0];
+    const done1 = classify.fromResult({ is_error: false, result: "reply-one" });
+    const s2 = classify.fromSent({ text: `visit ${china}` })[0];
+    const groups = groupTurns(foldTranscript([s1, ...done1, s2]));
+    const q = `${"x".repeat(199)}${letter}`;
+    expect(sanitizeQuery({ q }).needle.endsWith(letter)).toBe(false);
+    expect(filterGroups(groups, { q })).toEqual([]);
+    expect(filterGroups(groups, { q: letter })).toEqual([]);
+  });
+
   it("195x U+00AD + alpha-turn-unique keeps only that turn and not a truncated word", () => {
     const s1 = classify.fromSent({ text: "alpha-turn-unique" })[0];
     const done1 = classify.fromResult({ is_error: false, result: "reply-one" });

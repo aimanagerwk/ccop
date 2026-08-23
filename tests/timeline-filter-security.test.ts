@@ -112,7 +112,7 @@ describe("timeline-filter security", () => {
     const s = sanitizeQuery({ q });
     expect(s.needle).not.toBe("");
     expect(s.needle.includes(china)).toBe(true);
-    expect(haystackHas(canada, "\u{1F1E8}")).toBe(true);
+    expect(haystackHas(canada, "\u{1F1E8}")).toBe(false);
     expect(haystackHas(canada, s.needle)).toBe(false);
     expect(filterRows([{ type: "user", text: canada }], { q })).toEqual([]);
     expect(filterRows([{ type: "user", text: q }], { q }).length).toBe(1);
@@ -249,7 +249,7 @@ describe("timeline-filter security", () => {
     expect(s.needle).not.toBe("");
     expect(s.needle.includes(china)).toBe(true);
     expect(s.needle.includes("\u{1F1E8}") && !s.needle.includes(china)).toBe(false);
-    expect(haystackHas(canada, "\u{1F1E8}")).toBe(true);
+    expect(haystackHas(canada, "\u{1F1E8}")).toBe(false);
     expect(haystackHas(canada, s.needle)).toBe(false);
     const paddedCanada = `${"x".repeat(198)}${canada}`;
     expect(haystackHas(paddedCanada, s.needle)).toBe(false);
