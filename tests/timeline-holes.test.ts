@@ -88,6 +88,43 @@ describe("holes / unit", () => {
     expect(needle.length).toBeLessThanOrEqual(QUERY_MAX_LEN + 2);
   });
 
+  it("sanitizeQuery does not clip a flag to a half regional-indicator that matches another flag", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const q = `${"x".repeat(198)}${china}`;
+    const { needle } = sanitizeQuery({ q });
+    expect(needle).not.toBe("");
+    expect(needle.includes(china) || needle.endsWith(china)).toBe(true);
+    expect(needle.includes("\u{1F1E8}") && !needle.includes(china)).toBe(false);
+    expect(haystackHas(canada, "\u{1F1E8}")).toBe(true);
+    expect(haystackHas(canada, needle)).toBe(false);
+    expect(filterRows([{ type: "user", text: canada }], { q })).toEqual([]);
+    expect(filterRows([{ type: "user", text: q }], { q }).length).toBe(1);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
+  it("sanitizeQuery strips soft hyphens before clipping so the trailing word survives", () => {
+    const q = `${"­".repeat(195)}needle`;
+    const { needle } = sanitizeQuery({ q });
+    expect(needle).toBe("needle");
+    expect(needle).not.toBe("");
+    expect(needle.length).toBeLessThanOrEqual(QUERY_MAX_LEN);
+  });
+
+  it("sanitizeQuery keeps a ZWJ family sequence so the original row still matches", () => {
+    const family = "\u{1F468}‍\u{1F469}‍\u{1F467}";
+    const q = `${"x".repeat(190)}${family}`;
+    const { needle } = sanitizeQuery({ q });
+    expect(needle).toContain("‍");
+    expect(needle).toContain(family);
+    expect(haystackHas(q, family)).toBe(true);
+    const row: FoldedRow = { type: "user", text: q };
+    expect(filterRows([row], { q })).toEqual([row]);
+    const familyRow: FoldedRow = { type: "user", text: `family ${family}` };
+    expect(filterRows([familyRow], { q: family })).toEqual([familyRow]);
+    expect(filterRows([{ type: "user", text: "no family here" }], { q: family })).toEqual([]);
+  });
+
   it("sanitizeQuery word-clips so a mid-word cut does not keep half of world", () => {
     const padded = `hello world${"y".repeat(200)}`;
     const paddedNeedle = sanitizeQuery({ q: padded }).needle;
@@ -248,6 +285,44 @@ describe("holes / security", () => {
     const hit: FoldedRow = { type: "user", text: "has needle inside" };
     expect(filterRows([miss], { q })).toEqual([]);
     expect(filterRows([hit], { q })).toEqual([hit]);
+  });
+
+  it("soft-hyphen padded needle still finds only the real hit", () => {
+    const q = `${"­".repeat(195)}needle`;
+    const s = sanitizeQuery({ q });
+    expect(s.needle).toBe("needle");
+    expect(s.needle).not.toBe("");
+    const miss: FoldedRow = { type: "user", text: "nothing relevant" };
+    const hit: FoldedRow = { type: "user", text: "has needle inside" };
+    expect(filterRows([miss], { q })).toEqual([]);
+    expect(filterRows([hit], { q })).toEqual([hit]);
+  });
+
+  it("half a clipped flag never matches a different flag row", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const q = `${"x".repeat(198)}${china}`;
+    const s = sanitizeQuery({ q });
+    expect(s.needle).not.toBe("");
+    expect(s.needle.includes(china)).toBe(true);
+    expect(haystackHas(canada, "\u{1F1E8}")).toBe(true);
+    expect(haystackHas(canada, s.needle)).toBe(false);
+    expect(filterRows([{ type: "user", text: canada }], { q })).toEqual([]);
+    expect(filterRows([{ type: "user", text: q }], { q }).length).toBe(1);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
+  it("ZWJ family query matches the original family row and not a lone adult", () => {
+    const family = "\u{1F468}‍\u{1F469}‍\u{1F467}";
+    const q = `${"x".repeat(190)}${family}`;
+    const s = sanitizeQuery({ q });
+    expect(s.needle).toContain("‍");
+    expect(s.needle).toContain(family);
+    const familyRow: FoldedRow = { type: "user", text: family };
+    const adult: FoldedRow = { type: "user", text: "\u{1F468}" };
+    expect(filterRows([familyRow], { q: family })).toEqual([familyRow]);
+    expect(filterRows([{ type: "user", text: q }], { q })).toEqual([{ type: "user", text: q }]);
+    expect(filterRows([adult], { q: family })).toEqual([]);
   });
 
   it("sanitizeQuery source never builds a RegExp from user input", () => {
@@ -462,6 +537,53 @@ describe("holes / integration", () => {
     expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes("alpha-turn-unique"))).toBe(
       true,
     );
+  });
+
+  it("filterGroups with soft-hyphen-padded q still keeps only the needle turn", () => {
+    const connected = { kind: "working" as const, summary: "connected", extra: {} };
+    const s1 = classify.fromSent({ text: "alpha-turn-unique" })[0];
+    const done1 = classify.fromResult({ is_error: false, result: "reply-one" });
+    const s2 = classify.fromSent({ text: "beta-other" })[0];
+    const done2 = classify.fromResult({ is_error: false, result: "reply-two" });
+    const groups = groupTurns(foldTranscript([connected, s1, ...done1, s2, ...done2]));
+    const q = `${"­".repeat(195)}alpha-turn-unique`;
+    expect(sanitizeQuery({ q }).needle).toBe("alpha-turn-unique");
+    const filtered = filterGroups(groups, { q });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes("alpha-turn-unique"))).toBe(
+      true,
+    );
+  });
+
+  it("filterGroups with a padded ZWJ family keeps only the family turn", () => {
+    const family = "\u{1F468}‍\u{1F469}‍\u{1F467}";
+    const s1 = classify.fromSent({ text: `see ${family}` })[0];
+    const done1 = classify.fromResult({ is_error: false, result: "reply-one" });
+    const s2 = classify.fromSent({ text: "beta-other" })[0];
+    const done2 = classify.fromResult({ is_error: false, result: "reply-two" });
+    const groups = groupTurns(foldTranscript([s1, ...done1, s2, ...done2]));
+    const q = `${"x".repeat(190)}${family}`;
+    expect(sanitizeQuery({ q }).needle).toContain(family);
+    const filtered = filterGroups(groups, { q: family });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(family))).toBe(true);
+  });
+
+  it("filterGroups with a padded China flag does not keep a Canada-flag turn", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const s1 = classify.fromSent({ text: `visit ${canada}` })[0];
+    const done1 = classify.fromResult({ is_error: false, result: "reply-one" });
+    const s2 = classify.fromSent({ text: `visit ${china}` })[0];
+    const done2 = classify.fromResult({ is_error: false, result: "reply-two" });
+    const groups = groupTurns(foldTranscript([s1, ...done1, s2, ...done2]));
+    const padded = `${"x".repeat(198)}${china}`;
+    expect(sanitizeQuery({ q: padded }).needle.includes(china)).toBe(true);
+    expect(filterGroups(groups, { q: padded }).some((g) => g.rows.some((r) => r.type === "user" && r.text.includes(canada)))).toBe(false);
+    const filtered = filterGroups(groups, { q: china });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(china))).toBe(true);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(canada))).toBe(false);
   });
 
   it("filterGroups with zero-width-padded q still keeps only the needle turn", () => {

@@ -92,6 +92,44 @@ describe("timeline-filter security", () => {
     expect(filterRows([hit], { q })).toEqual([hit]);
   });
 
+  it("soft-hyphen padded query still matches the trailing word and never compiles q as RegExp", () => {
+    const src = readFileSync(new URL("../web/src/lib/timeline-filter.ts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/new RegExp/);
+    expect(src).not.toMatch(/RegExp\s*\(/);
+    const q = `${"­".repeat(195)}needle`;
+    const s = sanitizeQuery({ q });
+    expect(s.needle).toBe("needle");
+    const miss: FoldedRow = { type: "user", text: "nothing relevant" };
+    const hit: FoldedRow = { type: "user", text: "has needle inside" };
+    expect(filterRows([miss], { q })).toEqual([]);
+    expect(filterRows([hit], { q })).toEqual([hit]);
+  });
+
+  it("a padded China flag never matches a Canada flag via a half regional indicator", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const q = `${"x".repeat(198)}${china}`;
+    const s = sanitizeQuery({ q });
+    expect(s.needle).not.toBe("");
+    expect(s.needle.includes(china)).toBe(true);
+    expect(haystackHas(canada, "\u{1F1E8}")).toBe(true);
+    expect(haystackHas(canada, s.needle)).toBe(false);
+    expect(filterRows([{ type: "user", text: canada }], { q })).toEqual([]);
+    expect(filterRows([{ type: "user", text: q }], { q }).length).toBe(1);
+  });
+
+  it("a padded ZWJ family matches the family row and not a stripped adult-only row", () => {
+    const family = "\u{1F468}‍\u{1F469}‍\u{1F467}";
+    const q = `${"x".repeat(190)}${family}`;
+    expect(sanitizeQuery({ q }).needle).toContain("‍");
+    expect(sanitizeQuery({ q }).needle).toContain(family);
+    const familyRow: FoldedRow = { type: "user", text: family };
+    const adult: FoldedRow = { type: "user", text: "\u{1F468}" };
+    expect(filterRows([familyRow], { q: family })).toEqual([familyRow]);
+    expect(filterRows([{ type: "user", text: q }], { q })).toEqual([{ type: "user", text: q }]);
+    expect(filterRows([adult], { q: family })).toEqual([]);
+  });
+
   it("clipping 199 BMP chars plus a thumbs-up does not leave a lone surrogate", () => {
     const thumb = "\u{1F44D}";
     const q = `${"x".repeat(199)}${thumb}`;

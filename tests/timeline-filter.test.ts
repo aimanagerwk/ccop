@@ -33,6 +33,31 @@ describe("sanitizeQuery", () => {
     expect(needle).not.toMatch(/[\uD800-\uDBFF]$/);
   });
 
+  it("strips soft hyphens before clipping so a trailing word is kept", () => {
+    const q = `${"­".repeat(195)}needle`;
+    expect(sanitizeQuery({ q }).needle).toBe("needle");
+  });
+
+  it("keeps a complete flag grapheme so a half indicator cannot match another flag", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const q = `${"x".repeat(198)}${china}`;
+    const needle = sanitizeQuery({ q }).needle;
+    expect(needle.includes(china)).toBe(true);
+    expect(needle.includes("\u{1F1E8}") && !needle.includes(china)).toBe(false);
+    expect(filterRows([{ type: "user", text: canada }], { q })).toEqual([]);
+    expect(filterRows([{ type: "user", text: q }], { q }).length).toBe(1);
+  });
+
+  it("keeps ZWJ inside a family emoji so the original row matches", () => {
+    const family = "\u{1F468}‍\u{1F469}‍\u{1F467}";
+    const q = `${"x".repeat(190)}${family}`;
+    expect(sanitizeQuery({ q }).needle).toContain(family);
+    const row: FoldedRow = { type: "user", text: family };
+    expect(filterRows([row], { q: family })).toEqual([row]);
+    expect(filterRows([{ type: "user", text: q }], { q })).toEqual([{ type: "user", text: q }]);
+  });
+
   it("treats non-string q as empty needle", () => {
     expect(sanitizeQuery({ q: 12 as unknown as string }).needle).toBe("");
     expect(sanitizeQuery({ q: null as unknown as string }).needle).toBe("");

@@ -51,24 +51,14 @@ function clip(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) : s;
 }
 
-function isZeroWidth(code: number): boolean {
+function isFillerCode(code: number): boolean {
   return (
+    code === 0x00ad ||
     code === 0x200b ||
     code === 0x200c ||
-    code === 0x200d ||
     code === 0x2060 ||
-    code === 0xfeff ||
-    (code >= 0x200b && code <= 0x200d)
+    code === 0xfeff
   );
-}
-
-function stripZeroWidth(s: string): string {
-  let out = "";
-  for (let i = 0; i < s.length; i++) {
-    const code = s.charCodeAt(i);
-    if (!isZeroWidth(code)) out += s.charAt(i);
-  }
-  return out;
 }
 
 function isHighSurrogate(code: number): boolean {
@@ -79,16 +69,111 @@ function isLowSurrogate(code: number): boolean {
   return code >= 0xdc00 && code <= 0xdfff;
 }
 
-/** NFC + strip zero-width + trim, then clip on grapheme / word bounds. */
+function codePointAt(s: string, i: number): number | undefined {
+  if (i < 0 || i >= s.length) return undefined;
+  const hi = s.charCodeAt(i);
+  if (isHighSurrogate(hi) && i + 1 < s.length) {
+    const lo = s.charCodeAt(i + 1);
+    if (isLowSurrogate(lo)) return (hi - 0xd800) * 0x400 + (lo - 0xdc00) + 0x10000;
+  }
+  return hi;
+}
+
+function codePointWidth(cp: number): number {
+  return cp > 0xffff ? 2 : 1;
+}
+
+function isRegionalIndicator(cp: number): boolean {
+  return cp >= 0x1f1e6 && cp <= 0x1f1ff;
+}
+
+const ZWJ = 0x200d;
+const VS16 = 0xfe0f;
+const KEYCAP = 0x20e3;
+const TAG_START = 0xe0020;
+const TAG_END = 0xe007f;
+const SKIN_START = 0x1f3fb;
+const SKIN_END = 0x1f3ff;
+
+function isSkinTone(cp: number): boolean {
+  return cp >= SKIN_START && cp <= SKIN_END;
+}
+
+function isEmojiModifier(cp: number): boolean {
+  return cp === VS16 || cp === KEYCAP || isSkinTone(cp) || (cp >= TAG_START && cp <= TAG_END);
+}
+
+/** Consume one visible grapheme starting at i. Keeps ZWJ families and RI pairs. */
+function graphemeEnd(s: string, i: number): number {
+  const first = codePointAt(s, i);
+  if (first === undefined) return i;
+  let j = i + codePointWidth(first);
+  if (isRegionalIndicator(first)) {
+    const next = codePointAt(s, j);
+    if (next !== undefined && isRegionalIndicator(next)) j += codePointWidth(next);
+    return j;
+  }
+  while (j < s.length) {
+    const cp = codePointAt(s, j);
+    if (cp === undefined) break;
+    if (isEmojiModifier(cp)) {
+      j += codePointWidth(cp);
+      continue;
+    }
+    if (cp === ZWJ) {
+      const after = codePointAt(s, j + 1);
+      if (after === undefined) break;
+      j += 1 + codePointWidth(after);
+      continue;
+    }
+    break;
+  }
+  return j;
+}
+
+function stripFillers(s: string): string {
+  let out = "";
+  let i = 0;
+  while (i < s.length) {
+    const cp = codePointAt(s, i);
+    if (cp === undefined) break;
+    const w = codePointWidth(cp);
+    if (isFillerCode(cp)) {
+      i += w;
+      continue;
+    }
+    if (cp === ZWJ) {
+      const next = codePointAt(s, i + w);
+      const prev = out.length ? codePointAt(out, out.length - (out.length >= 2 && isLowSurrogate(out.charCodeAt(out.length - 1)) ? 2 : 1)) : undefined;
+      if (next !== undefined && prev !== undefined && !isFillerCode(next) && !isFillerCode(prev)) {
+        const end = graphemeEnd(s, i);
+        out += s.slice(i, end);
+        i = end;
+        continue;
+      }
+      i += w;
+      continue;
+    }
+    const end = graphemeEnd(s, i);
+    out += s.slice(i, end);
+    i = end;
+  }
+  return out;
+}
+
+/** NFC + strip fillers + trim, then clip on grapheme / word bounds. */
 function normalizeNeedle(q: string): string {
-  const s = stripZeroWidth(q.normalize("NFC")).trim();
+  const s = stripFillers(q.normalize("NFC")).trim();
   if (s.length <= QUERY_MAX_LEN) return s;
-  let end = QUERY_MAX_LEN;
-  if (end > 0 && end < s.length) {
-    const prev = s.charCodeAt(end - 1);
-    const next = s.charCodeAt(end);
-    if (isHighSurrogate(prev) && isLowSurrogate(next)) end += 1;
-    else if (isHighSurrogate(prev)) end -= 1;
+  let end = 0;
+  while (end < s.length) {
+    const next = graphemeEnd(s, end);
+    if (next > QUERY_MAX_LEN && end > 0) {
+      end = next;
+      break;
+    }
+    end = next;
+    if (end >= QUERY_MAX_LEN) break;
   }
   let clipped = s.slice(0, end);
   if (end < s.length && /\S/.test(s.charAt(end)) && /\S$/.test(clipped) && /\s/.test(clipped)) {

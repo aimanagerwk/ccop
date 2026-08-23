@@ -63,6 +63,49 @@ describe("fold then groupTurns then filterGroups", () => {
     );
   });
 
+  it("soft-hyphen padded unique user text still selects that turn", () => {
+    const s1 = classify.fromSent({ text: "alpha-turn-unique" })[0];
+    const done1 = classify.fromResult({ is_error: false, result: "reply-one" });
+    const s2 = classify.fromSent({ text: "beta-other" })[0];
+    const groups = groupTurns(foldTranscript([s1, ...done1, s2]));
+    const q = `${"­".repeat(195)}alpha-turn-unique`;
+    expect(sanitizeQuery({ q }).needle).toBe("alpha-turn-unique");
+    const filtered = filterGroups(groups, { q });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes("alpha-turn-unique"))).toBe(
+      true,
+    );
+  });
+
+  it("padded ZWJ family still selects that turn", () => {
+    const family = "\u{1F468}‍\u{1F469}‍\u{1F467}";
+    const s1 = classify.fromSent({ text: `see ${family}` })[0];
+    const done1 = classify.fromResult({ is_error: false, result: "reply-one" });
+    const s2 = classify.fromSent({ text: "beta-other" })[0];
+    const groups = groupTurns(foldTranscript([s1, ...done1, s2]));
+    const q = `${"x".repeat(190)}${family}`;
+    expect(sanitizeQuery({ q }).needle).toContain(family);
+    const filtered = filterGroups(groups, { q: family });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(family))).toBe(true);
+  });
+
+  it("padded China flag does not select a Canada-flag turn", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const s1 = classify.fromSent({ text: `visit ${canada}` })[0];
+    const done1 = classify.fromResult({ is_error: false, result: "reply-one" });
+    const s2 = classify.fromSent({ text: `visit ${china}` })[0];
+    const groups = groupTurns(foldTranscript([s1, ...done1, s2]));
+    const padded = `${"x".repeat(198)}${china}`;
+    expect(sanitizeQuery({ q: padded }).needle.includes(china)).toBe(true);
+    expect(filterGroups(groups, { q: padded }).some((g) => g.rows.some((r) => r.type === "user" && r.text.includes(canada)))).toBe(false);
+    const filtered = filterGroups(groups, { q: china });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(china))).toBe(true);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(canada))).toBe(false);
+  });
+
   it("type filter tool plus needle on name survives the pipeline", () => {
     const sent = classify.fromSent({ text: "please Read this" })[0];
     const tool = classify.fromToolUse({
