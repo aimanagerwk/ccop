@@ -64,11 +64,20 @@ describe("holes / unit", () => {
   it("sanitizeQuery does not leave a lone surrogate when clipping just before a thumbs-up", () => {
     const thumb = "\u{1F44D}";
     const q = `${"x".repeat(199)}${thumb}`;
+    expect(q.length).toBe(201);
     const { needle } = sanitizeQuery({ q });
+    expect(needle).not.toBe("");
     expect(needle).not.toMatch(/[\uD800-\uDBFF]$/);
     expect(needle).not.toMatch(/^[\uDC00-\uDFFF]/);
     expect(needle.endsWith(thumb) || haystackHas(thumb, needle)).toBe(true);
     expect(needle.includes("\uD83D") && !needle.includes(thumb)).toBe(false);
+  });
+
+  it("sanitizeQuery strips ZWNJ ZWJ BOM and word-joiner before clipping the trailing word", () => {
+    const q = `${"‌".repeat(40)}${"‍".repeat(40)}${"﻿".repeat(40)}${"⁠".repeat(75)}needle`;
+    const { needle } = sanitizeQuery({ q });
+    expect(needle).toBe("needle");
+    expect(needle).not.toBe("");
   });
 
   it("sanitizeQuery NFC-normalizes before limiting length so a combining mark is not dropped", () => {
@@ -159,7 +168,7 @@ describe("holes / unit", () => {
   it("makeGroup and rebuildGroup compare timestamps through toEpochMs", () => {
     const turnSrc = readFileSync(new URL("../web/src/lib/timeline-turn.ts", import.meta.url), "utf8");
     const filterSrc = readFileSync(new URL("../web/src/lib/timeline-filter.ts", import.meta.url), "utf8");
-    expect(turnSrc).toMatch(/toEpochMs/);
+    expect(turnSrc).toMatch(/toEpochMs\s*\(/);
     expect(filterSrc).toMatch(/toEpochMs\s*\(/);
   });
 
@@ -293,6 +302,9 @@ describe("holes / security", () => {
   it("Transcript pins search changes to endScrollTop", () => {
     const src = readFileSync(new URL("../web/src/components/Transcript.tsx", import.meta.url), "utf8");
     expect(src).toMatch(/endScrollTop/);
+    expect(src).toMatch(/el\.scrollTop/);
+    expect(src).toMatch(/listRef/);
+    expect(src).toMatch(/setScroll/);
   });
 
   it("3MB tool output haystack is ~64k clipped prefix, not the raw blob", () => {

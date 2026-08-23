@@ -56,6 +56,20 @@ describe("timeline timestamp security", () => {
     expect(src).toMatch(/formatDateTimeAttr\(row\.ts\)/);
     expect(src).not.toMatch(/String\(row\.ts\)/);
   });
+
+  it("makeGroup compares mixed-unit ts through toEpochMs and keeps raw values", () => {
+    const src = readFileSync(new URL("../web/src/lib/timeline-turn.ts", import.meta.url), "utf8");
+    expect(src).toMatch(/toEpochMs\s*\(/);
+    const laterSec = 1_787_404_000;
+    const earlierMs = 1_787_403_750_285;
+    const [g] = groupTurns([
+      { type: "user", text: "later", ts: laterSec },
+      { type: "assistant", text: "earlier", ts: earlierMs },
+    ]);
+    expect(g.startTs).toBe(earlierMs);
+    expect(g.endTs).toBe(laterSec);
+    expect(toEpochMs(g.startTs)!).toBeLessThanOrEqual(toEpochMs(g.endTs)!);
+  });
 });
 
 const GROUP_ALLOW = new Set(["turnId", "startTs", "endTs", "dayKey", "rows"]);

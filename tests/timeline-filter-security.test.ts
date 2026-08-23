@@ -81,10 +81,23 @@ describe("timeline-filter security", () => {
     expect(filterRows([hit], { q })).toEqual([hit]);
   });
 
+  it("BOM ZWJ and word-joiner prefixes do not eat the clip budget or match every row", () => {
+    const q = `${"\ufeff".repeat(80)}${"\u200d".repeat(80)}${"\u2060".repeat(35)}needle`;
+    const s = sanitizeQuery({ q });
+    expect(s.needle).toBe("needle");
+    expect(s.needle).not.toBe("");
+    const miss: FoldedRow = { type: "user", text: "nothing relevant" };
+    const hit: FoldedRow = { type: "user", text: "has needle inside" };
+    expect(filterRows([miss], { q })).toEqual([]);
+    expect(filterRows([hit], { q })).toEqual([hit]);
+  });
+
   it("clipping 199 BMP chars plus a thumbs-up does not leave a lone surrogate", () => {
     const thumb = "\u{1F44D}";
     const q = `${"x".repeat(199)}${thumb}`;
+    expect(q.length).toBe(201);
     const s = sanitizeQuery({ q });
+    expect(s.needle).not.toBe("");
     expect(s.needle).not.toMatch(/[\uD800-\uDBFF]$/);
     expect(s.needle.endsWith(thumb) || haystackHas(thumb, s.needle)).toBe(true);
   });

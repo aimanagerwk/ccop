@@ -5,6 +5,7 @@ import {
   QUERY_MAX_LEN,
   filterGroups,
   filterRows,
+  haystackHas,
   sanitizeQuery,
 } from "../web/src/lib/timeline-filter.js";
 import { groupTurns } from "../web/src/lib/timeline-turn.js";
@@ -21,6 +22,15 @@ describe("sanitizeQuery", () => {
   it("strips U+200B fillers before clipping so a trailing word is kept", () => {
     const q = `${"\u200b".repeat(195)}needle`;
     expect(sanitizeQuery({ q }).needle).toBe("needle");
+  });
+
+  it("keeps a complete thumbs-up grapheme that sits just past QUERY_MAX_LEN", () => {
+    const thumb = "\u{1F44D}";
+    const q = `${"x".repeat(199)}${thumb}`;
+    const needle = sanitizeQuery({ q }).needle;
+    expect(needle).not.toBe("");
+    expect(needle.endsWith(thumb) || haystackHas("\u{1F44D}", needle)).toBe(true);
+    expect(needle).not.toMatch(/[\uD800-\uDBFF]$/);
   });
 
   it("treats non-string q as empty needle", () => {
