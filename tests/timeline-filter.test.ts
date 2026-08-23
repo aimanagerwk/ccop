@@ -58,6 +58,45 @@ describe("sanitizeQuery", () => {
     expect(filterRows([{ type: "user", text: q }], { q })).toEqual([{ type: "user", text: q }]);
   });
 
+  it("198x+🇨🇳 (q.length=202) cannot match 🇨🇦 via a leftover half RI", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const q = `${"x".repeat(198)}${china}`;
+    expect(q.length).toBe(202);
+    const needle = sanitizeQuery({ q }).needle;
+    expect(needle).not.toBe("");
+    expect(needle.includes(china)).toBe(true);
+    expect(needle.includes("\u{1F1E8}") && !needle.includes(china)).toBe(false);
+    expect(haystackHas(canada, "\u{1F1E8}")).toBe(true);
+    expect(haystackHas(canada, needle)).toBe(false);
+    const paddedCanada = `${"x".repeat(198)}${canada}`;
+    expect(haystackHas(paddedCanada, needle)).toBe(false);
+    expect(filterRows([{ type: "user", text: canada }], { q })).toEqual([]);
+    expect(filterRows([{ type: "user", text: paddedCanada }], { q })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
+  it("195x U+00AD plus needle is the full word, not needl or pure SHY", () => {
+    const q = `${"­".repeat(195)}needle`;
+    const needle = sanitizeQuery({ q }).needle;
+    expect(needle).toBe("needle");
+    expect(needle).not.toBe("needl");
+    expect(needle).not.toMatch(/^­+$/);
+    expect(filterRows([{ type: "user", text: "nothing relevant" }], { q })).toEqual([]);
+    expect(filterRows([{ type: "user", text: "has needle inside" }], { q }).length).toBe(1);
+  });
+
+  it("ZWJ family 👨‍👩‍👧 is kept whole so a lone 👨 does not match", () => {
+    const family = "\u{1F468}‍\u{1F469}‍\u{1F467}";
+    const q = `${"x".repeat(190)}${family}`;
+    const needle = sanitizeQuery({ q }).needle;
+    expect(needle).toContain("‍");
+    expect(needle).toContain(family);
+    const familyRow: FoldedRow = { type: "user", text: family };
+    expect(filterRows([familyRow], { q: family })).toEqual([familyRow]);
+    expect(filterRows([{ type: "user", text: "\u{1F468}" }], { q: family })).toEqual([]);
+  });
+
   it("treats non-string q as empty needle", () => {
     expect(sanitizeQuery({ q: 12 as unknown as string }).needle).toBe("");
     expect(sanitizeQuery({ q: null as unknown as string }).needle).toBe("");
@@ -259,5 +298,57 @@ describe("filterGroups", () => {
     expect(out[0].turnId).toBe(1);
     expect(out[0].rows).toEqual([asst]);
     expect(out[0]).not.toBe(groups[1]);
+  });
+
+  it("filterGroups: padded 🇨🇳 must not leave a 🇨🇦 turn", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const groups = groupTurns([
+      { type: "user", text: `visit ${canada}` },
+      { type: "user", text: `visit ${china}` },
+    ]);
+    const padded = `${"x".repeat(198)}${china}`;
+    expect(padded.length).toBe(202);
+    expect(sanitizeQuery({ q: padded }).needle.includes(china)).toBe(true);
+    const paddedCanada = `${"x".repeat(198)}${canada}`;
+    expect(haystackHas(paddedCanada, sanitizeQuery({ q: padded }).needle)).toBe(false);
+    expect(
+      filterGroups(groups, { q: padded }).some((g) =>
+        g.rows.some((r) => r.type === "user" && r.text.includes(canada)),
+      ),
+    ).toBe(false);
+    expect(filterGroups(groups, { q: paddedCanada }).some((g) =>
+      g.rows.some((r) => r.type === "user" && r.text.includes(china)),
+    )).toBe(false);
+    const filtered = filterGroups(groups, { q: china });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(china))).toBe(true);
+  });
+
+  it("filterGroups: 195x U+00AD + alpha-turn-unique keeps only that turn", () => {
+    const groups = groupTurns([
+      { type: "user", text: "alpha-turn-unique" },
+      { type: "user", text: "beta-other" },
+    ]);
+    const q = `${"­".repeat(195)}alpha-turn-unique`;
+    expect(sanitizeQuery({ q }).needle).toBe("alpha-turn-unique");
+    const filtered = filterGroups(groups, { q });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes("alpha-turn-unique"))).toBe(
+      true,
+    );
+  });
+
+  it("filterGroups: 👨‍👩‍👧 query keeps only the family turn", () => {
+    const family = "\u{1F468}‍\u{1F469}‍\u{1F467}";
+    const groups = groupTurns([
+      { type: "user", text: `see ${family}` },
+      { type: "user", text: "adult \u{1F468}" },
+    ]);
+    const q = `${"x".repeat(190)}${family}`;
+    expect(sanitizeQuery({ q }).needle).toContain(family);
+    const filtered = filterGroups(groups, { q: family });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(family))).toBe(true);
   });
 });

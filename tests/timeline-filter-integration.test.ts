@@ -106,6 +106,66 @@ describe("fold then groupTurns then filterGroups", () => {
     expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(canada))).toBe(false);
   });
 
+  it("198x+🇨🇳 (q.length=202) must not leave a 🇨🇦 turn", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const s1 = classify.fromSent({ text: `visit ${canada}` })[0];
+    const done1 = classify.fromResult({ is_error: false, result: "reply-one" });
+    const s2 = classify.fromSent({ text: `visit ${china}` })[0];
+    const groups = groupTurns(foldTranscript([s1, ...done1, s2]));
+    const padded = `${"x".repeat(198)}${china}`;
+    expect(padded.length).toBe(202);
+    expect(sanitizeQuery({ q: padded }).needle.includes(china)).toBe(true);
+    const paddedCanada = `${"x".repeat(198)}${canada}`;
+    expect(
+      filterGroups(groups, { q: padded }).some((g) =>
+        g.rows.some((r) => r.type === "user" && r.text.includes(canada)),
+      ),
+    ).toBe(false);
+    const paddedCanadaTurn = classify.fromSent({ text: paddedCanada })[0];
+    const paddedChinaTurn = classify.fromSent({ text: padded })[0];
+    const paddedGroups = groupTurns(foldTranscript([paddedCanadaTurn, paddedChinaTurn]));
+    expect(
+      filterGroups(paddedGroups, { q: padded }).some((g) =>
+        g.rows.some((r) => r.type === "user" && r.text.includes(canada)),
+      ),
+    ).toBe(false);
+    const filtered = filterGroups(groups, { q: china });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(china))).toBe(true);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(canada))).toBe(false);
+  });
+
+  it("195x U+00AD + alpha-turn-unique keeps only that turn and not a truncated word", () => {
+    const s1 = classify.fromSent({ text: "alpha-turn-unique" })[0];
+    const done1 = classify.fromResult({ is_error: false, result: "reply-one" });
+    const s2 = classify.fromSent({ text: "beta-other" })[0];
+    const groups = groupTurns(foldTranscript([s1, ...done1, s2]));
+    const q = `${"­".repeat(195)}alpha-turn-unique`;
+    expect(sanitizeQuery({ q }).needle).toBe("alpha-turn-unique");
+    expect(sanitizeQuery({ q }).needle).not.toBe("alpha-turn-uniqu");
+    const filtered = filterGroups(groups, { q });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes("alpha-turn-unique"))).toBe(
+      true,
+    );
+  });
+
+  it("ZWJ family 👨‍👩‍👧 keeps the family turn and drops a lone-👨 turn", () => {
+    const family = "\u{1F468}‍\u{1F469}‍\u{1F467}";
+    const s1 = classify.fromSent({ text: `see ${family}` })[0];
+    const done1 = classify.fromResult({ is_error: false, result: "reply-one" });
+    const s2 = classify.fromSent({ text: `adult \u{1F468}` })[0];
+    const groups = groupTurns(foldTranscript([s1, ...done1, s2]));
+    const q = `${"x".repeat(190)}${family}`;
+    expect(sanitizeQuery({ q }).needle).toContain("‍");
+    expect(sanitizeQuery({ q }).needle).toContain(family);
+    const filtered = filterGroups(groups, { q: family });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(family))).toBe(true);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes("adult"))).toBe(false);
+  });
+
   it("type filter tool plus needle on name survives the pipeline", () => {
     const sent = classify.fromSent({ text: "please Read this" })[0];
     const tool = classify.fromToolUse({

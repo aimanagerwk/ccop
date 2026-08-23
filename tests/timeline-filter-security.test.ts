@@ -226,4 +226,60 @@ describe("timeline-filter security", () => {
     expect(s.types!.has("user")).toBe(true);
     expect(({} as { hacked?: boolean }).hacked).toBeUndefined();
   });
+
+  it("never compiles user input as RegExp; U+00AD is filler and ZWJ is not", () => {
+    const src = readFileSync(new URL("../web/src/lib/timeline-filter.ts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/new RegExp/);
+    expect(src).not.toMatch(/RegExp\s*\(/);
+    const filler = src.match(/function isFillerCode\([\s\S]*?\n\}/)?.[0] ?? "";
+    expect(filler.length).toBeGreaterThan(0);
+    expect(filler).toMatch(/0x00ad/i);
+    expect(filler).not.toMatch(/0x200d/i);
+    const s = sanitizeQuery({ q: ".*+?^${}()|[]\\" });
+    expect(s.needle).toBe(".*+?^${}()|[]\\");
+    expect(s.needle).not.toBeInstanceOf(RegExp);
+  });
+
+  it("198x+🇨🇳 (q.length=202) cannot match 🇨🇦 via a leftover half RI", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const q = `${"x".repeat(198)}${china}`;
+    expect(q.length).toBe(202);
+    const s = sanitizeQuery({ q });
+    expect(s.needle).not.toBe("");
+    expect(s.needle.includes(china)).toBe(true);
+    expect(s.needle.includes("\u{1F1E8}") && !s.needle.includes(china)).toBe(false);
+    expect(haystackHas(canada, "\u{1F1E8}")).toBe(true);
+    expect(haystackHas(canada, s.needle)).toBe(false);
+    const paddedCanada = `${"x".repeat(198)}${canada}`;
+    expect(haystackHas(paddedCanada, s.needle)).toBe(false);
+    expect(filterRows([{ type: "user", text: canada }], { q })).toEqual([]);
+    expect(filterRows([{ type: "user", text: paddedCanada }], { q })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
+  it("195x U+00AD plus needle is the full word, not needl or a SHY-only needle", () => {
+    const q = `${"­".repeat(195)}needle`;
+    const s = sanitizeQuery({ q });
+    expect(s.needle).toBe("needle");
+    expect(s.needle).not.toBe("needl");
+    expect(s.needle).not.toMatch(/^­+$/);
+    const miss: FoldedRow = { type: "user", text: "nothing relevant" };
+    const hit: FoldedRow = { type: "user", text: "has needle inside" };
+    expect(filterRows([miss], { q })).toEqual([]);
+    expect(filterRows([hit], { q })).toEqual([hit]);
+  });
+
+  it("ZWJ family 👨‍👩‍👧 stays whole so a lone 👨 does not match", () => {
+    const family = "\u{1F468}‍\u{1F469}‍\u{1F467}";
+    const q = `${"x".repeat(190)}${family}`;
+    const s = sanitizeQuery({ q });
+    expect(s.needle).toContain("‍");
+    expect(s.needle).toContain(family);
+    const familyRow: FoldedRow = { type: "user", text: family };
+    const adult: FoldedRow = { type: "user", text: "\u{1F468}" };
+    expect(filterRows([familyRow], { q: family })).toEqual([familyRow]);
+    expect(filterRows([{ type: "user", text: q }], { q })).toEqual([{ type: "user", text: q }]);
+    expect(filterRows([adult], { q: family })).toEqual([]);
+  });
 });
