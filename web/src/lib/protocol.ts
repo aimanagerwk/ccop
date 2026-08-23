@@ -96,6 +96,8 @@ export type SessionRow = {
   last_error?: StatusMark | null;
   state?: string;
   last_kind?: string;
+  /** Epoch seconds. Disk field from upsertSession, passed through status. */
+  updated_ts?: number;
 };
 
 export type ClassifiedEvent = {

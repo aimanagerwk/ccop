@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Composer } from "../components/Composer";
 import { PathTree, type TreeSel } from "../components/PathTree";
 import { PendingBar } from "../components/PendingBar";
+import { PendingInbox } from "../components/PendingInbox";
 import { Toasts, type ToastItem } from "../components/Toasts";
 import { Transcript } from "../components/Transcript";
 import { WorkflowPanel } from "../components/WorkflowPanel";
@@ -19,8 +20,10 @@ import {
   type DepotServer,
   type DepotState,
 } from "../lib/depot-store";
+import { collectPendingInbox } from "../lib/pending-inbox";
 import type { ClassifiedEvent, SessionRow } from "../lib/protocol";
 import { toastPriority } from "../lib/protocol";
+import { buildSessionUrl, parseSessionUrl } from "../lib/session-url";
 
 function asSessions(raw: unknown): SessionRow[] {
   if (!Array.isArray(raw)) return [];
@@ -46,11 +49,20 @@ export default function Page() {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const selRef = useRef(sel);
   const toastN = useRef(0);
+  const booted = useRef(false);
   selRef.current = sel;
 
   const persist = useCallback((next: DepotState) => {
     setDepot(next);
     saveDepot(next);
+  }, []);
+
+  const writeUrl = useCallback((serverId: string | null, sessionId: string | null) => {
+    if (typeof window === "undefined") return;
+    const href = buildSessionUrl({ serverId, sessionId });
+    if (`${window.location.pathname}${window.location.search}` !== href) {
+      window.history.replaceState(null, "", href);
+    }
   }, []);
 
   const refreshOne = useCallback(async (serverId: string) => {
@@ -98,6 +110,7 @@ export default function Page() {
   const onSelectSession = useCallback(
     (serverId: string, cwd: string | undefined, id: string) => {
       setSel({ serverId, cwd: cwd || null, sessionId: id });
+      writeUrl(serverId, id);
       setBadges((b) => {
         const next = { ...b };
         delete next[id];
@@ -106,7 +119,7 @@ export default function Page() {
       void loadEvents(serverId, id);
       void loadMonitor(serverId, id);
     },
-    [loadEvents, loadMonitor],
+    [loadEvents, loadMonitor, writeUrl],
   );
 
   const connectServer = useCallback(
@@ -125,7 +138,59 @@ export default function Page() {
     [refreshOne],
   );
 
+  const applyUrlSel = useCallback(
+    async (
+      parsed: { serverId: string | null; sessionId: string | null },
+      liveMap: Record<string, boolean>,
+      servers: DepotServer[],
+    ) => {
+      if (!parsed.serverId) {
+        setSel({ serverId: null, cwd: null, sessionId: null });
+        setEvents([]);
+        clearMonitor();
+        return;
+      }
+      const srv = servers.find((s) => s.id === parsed.serverId);
+      if (!srv) {
+        setSel({ serverId: parsed.serverId, cwd: null, sessionId: null });
+        setEvents([]);
+        clearMonitor();
+        return;
+      }
+      if (srv.token && !liveMap[parsed.serverId]) {
+        const err = await connectServer(srv);
+        if (!err) liveMap[parsed.serverId] = true;
+      }
+      if (!parsed.sessionId) {
+        setSel({ serverId: parsed.serverId, cwd: null, sessionId: null });
+        setEvents([]);
+        clearMonitor();
+        return;
+      }
+      if (liveMap[parsed.serverId] !== true) {
+        setSel({ serverId: parsed.serverId, cwd: null, sessionId: null });
+        setEvents([]);
+        clearMonitor();
+        return;
+      }
+      const res = await rpc("status", {}, parsed.serverId);
+      const rows = res.ok ? asSessions(res.sessions) : [];
+      setSessionsByServer((m) => ({ ...m, [parsed.serverId!]: rows }));
+      const hit = rows.find((s) => s.id === parsed.sessionId);
+      if (!hit) {
+        setSel({ serverId: parsed.serverId, cwd: null, sessionId: null });
+        setEvents([]);
+        clearMonitor();
+        return;
+      }
+      onSelectSession(parsed.serverId, hit.cwd, hit.id);
+    },
+    [clearMonitor, connectServer, onSelectSession],
+  );
+
   useEffect(() => {
+    if (booted.current) return;
+    booted.current = true;
     const stored = loadDepot();
     setDepot(stored);
     void (async () => {
@@ -148,11 +213,28 @@ export default function Page() {
       if (h.connected) {
         await Promise.all(h.servers.filter((s) => s.connected).map((s) => refreshOne(s.id)));
       }
-      for (const s of next.servers) {
-        if (s.token && !liveMap[s.id]) void connectServer(s);
+      const pendingConnect = next.servers.filter((s) => s.token && !liveMap[s.id]);
+      if (pendingConnect.length) {
+        await Promise.all(pendingConnect.map((s) => connectServer(s)));
+        for (const s of pendingConnect) liveMap[s.id] = true;
+      }
+      if (typeof window !== "undefined") {
+        const parsed = parseSessionUrl(window.location.search);
+        if (parsed.serverId || parsed.sessionId) {
+          await applyUrlSel(parsed, liveMap, next.servers);
+        }
       }
     })();
-  }, [connectServer, persist, refreshOne]);
+  }, [applyUrlSel, connectServer, persist, refreshOne]);
+
+  useEffect(() => {
+    const onPop = () => {
+      const parsed = parseSessionUrl(window.location.search);
+      void applyUrlSel(parsed, live, depot.servers);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [applyUrlSel, depot.servers, live]);
 
   const anyLive = Object.values(live).some(Boolean);
 
@@ -208,6 +290,8 @@ export default function Page() {
   const crumbCwd = current?.cwd || sel.cwd || "";
   const crumbDir = lastPathSeg(crumbCwd) || "—";
   const crumbName = current ? sessLabel(current) : "";
+  const inbox = collectPendingInbox(sessionsByServer, live);
+  const serverLabel = (id: string) => depot.servers.find((s) => s.id === id)?.label || id;
 
   return (
     <div className={`app${depot.collapsed ? " collapsed" : ""}`}>
@@ -218,9 +302,11 @@ export default function Page() {
         selected={sel}
         badges={badges}
         collapsed={depot.collapsed}
+        inboxCount={inbox.length}
         onToggleCollapsed={() => persist({ ...depot, collapsed: !depot.collapsed })}
         onSelectServer={(id) => {
           setSel({ serverId: id, cwd: null, sessionId: null });
+          writeUrl(id, null);
           setEvents([]);
           clearMonitor();
           const s = depot.servers.find((x) => x.id === id);
@@ -229,6 +315,7 @@ export default function Page() {
         }}
         onSelectCwd={(serverId, cwd) => {
           setSel({ serverId, cwd, sessionId: null });
+          writeUrl(serverId, null);
           setEvents([]);
           clearMonitor();
         }}
@@ -239,12 +326,14 @@ export default function Page() {
             : [...depot.servers, s];
           persist({ ...depot, servers });
           setSel({ serverId: s.id, cwd: null, sessionId: null });
+          writeUrl(s.id, null);
           void connectServer(s);
         }}
         onDropServer={(id) => {
           persist({ ...depot, servers: depot.servers.filter((s) => s.id !== id) });
           if (sel.serverId === id) {
             setSel({ serverId: null, cwd: null, sessionId: null });
+            writeUrl(null, null);
             setEvents([]);
             clearMonitor();
           }
@@ -265,12 +354,19 @@ export default function Page() {
           await refreshOne(serverId);
           if (sel.sessionId === id) {
             setSel({ serverId, cwd: sel.cwd, sessionId: null });
+            writeUrl(serverId, null);
             setEvents([]);
             clearMonitor();
           }
         }}
       />
       <div className="main">
+        <PendingInbox
+          items={inbox}
+          serverLabel={serverLabel}
+          onDone={() => void refreshAll()}
+          onOpen={(item) => onSelectSession(item.serverId, item.cwd, item.sessionId)}
+        />
         {current ? (
           <>
             <div

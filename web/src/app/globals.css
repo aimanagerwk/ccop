@@ -226,6 +226,15 @@ label {
   max-width: 120px;
   opacity: 1;
 }
+.trow-ago {
+  font-size: 11px;
+  color: var(--mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 1 auto;
+  min-width: 0;
+}
 .trow-acts {
   display: flex;
   gap: 1px;
@@ -396,6 +405,29 @@ label {
   padding: 8px 16px;
   flex-shrink: 0;
 }
+.inbox {
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  padding: 8px 16px;
+  flex-shrink: 0;
+  max-height: 40%;
+  overflow: auto;
+}
+.inbox-head {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--mute);
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.inbox-count {
+  color: var(--warn);
+  font-family: var(--font-mono);
+}
+.inbox-row { margin-bottom: 6px; }
 
 .toasts {
   position: fixed;
