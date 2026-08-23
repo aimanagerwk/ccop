@@ -12,6 +12,7 @@ import {
   UNSETTLED_LABEL,
   STALE_LABEL,
   SETTLED_LABEL,
+  INCOMPLETE_LABEL,
   OTHER_LABEL,
 } from "../web/src/lib/usage-viz.js";
 
@@ -70,6 +71,16 @@ describe("usageFreshness", () => {
     expect(usageFreshness({ usage_updated_ts: null, last_kind: "working" }).label).toBe(UNSETTLED_LABEL);
     expect(usageFreshness({ usage_updated_ts: null, last_kind: "sent" }).state).toBe("unsettled");
   });
+
+  it("is 缺数据 when live numbers exist but there is no Result timestamp", () => {
+    expect(usageFreshness({ usage_updated_ts: null, last_kind: "working", has_snapshot: true })).toEqual({
+      state: "incomplete",
+      label: INCOMPLETE_LABEL,
+      updated_ts: null,
+    });
+    expect(usageFreshness({ last_kind: "idle", has_snapshot: true }).state).toBe("incomplete");
+    expect(usageFreshness({ usage_updated_ts: null, has_snapshot: false }).state).toBe("unsettled");
+  });
 });
 
 describe("tokenSpark", () => {
@@ -106,6 +117,21 @@ describe("tokenSpark", () => {
     expect(spark.path).toBeNull();
     expect(spark.last).toBeNull();
     expect(spark.label).toBe(UNSETTLED_LABEL);
+  });
+
+  it("uses live status/info tokens as a one-point headline when history is missing", () => {
+    const spark = tokenSpark(
+      [],
+      usageFreshness({ usage_updated_ts: null, has_snapshot: true }),
+      undefined,
+      { input_tokens: 46542, output_tokens: 1490, cache_read_input_tokens: 256, cache_creation_input_tokens: 0 },
+    );
+    expect(spark.state).toBe("incomplete");
+    expect(spark.label).toBe(INCOMPLETE_LABEL);
+    expect(spark.headline).toBe(46542 + 1490 + 256);
+    expect(spark.points).toHaveLength(1);
+    expect(spark.path).toBeNull();
+    expect(spark.last).not.toBeNull();
   });
 
   it("does not treat assistant-shaped junk as a history point", () => {
@@ -151,6 +177,10 @@ describe("burnRate", () => {
   it("does not invent a rate from empty history or a zero Δt", () => {
     expect(burnRate([], settled).usd_per_min).toBeNull();
     expect(burnRate([], settled).label).toBe(UNSETTLED_LABEL);
+    const incomplete = usageFreshness({ usage_updated_ts: null, has_snapshot: true });
+    expect(burnRate([], incomplete).usd_per_min).toBeNull();
+    expect(burnRate([], incomplete).label).toBe(INCOMPLETE_LABEL);
+    expect(burnRate([], incomplete).state).toBe("incomplete");
     const sameTs = [
       { ...a, ts: 10 },
       { ...b, ts: 10 },
@@ -211,6 +241,17 @@ describe("cacheHit", () => {
     );
     expect(zero.ratio).toBeNull();
   });
+
+  it("uses live billed tokens when history is missing and marks 缺数据", () => {
+    const hit = cacheHit(
+      [],
+      usageFreshness({ usage_updated_ts: null, has_snapshot: true }),
+      { input_tokens: 46542, cache_read_input_tokens: 256, cache_creation_input_tokens: 0 },
+    );
+    expect(hit.state).toBe("incomplete");
+    expect(hit.label).toBe(INCOMPLETE_LABEL);
+    expect(hit.ratio).toBeCloseTo(256 / (46542 + 256 + 0), 8);
+  });
 });
 
 describe("modelCostPie", () => {
@@ -230,6 +271,11 @@ describe("modelCostPie", () => {
     expect(mid.form).toBe("empty");
     expect(mid.slices).toEqual([]);
     expect(mid.label).toBe(UNSETTLED_LABEL);
+    const live = modelCostPie([m1, m2], usageFreshness({ usage_updated_ts: null, has_snapshot: true }));
+    expect(live.form).toBe("pie");
+    expect(live.state).toBe("incomplete");
+    expect(live.label).toBe(INCOMPLETE_LABEL);
+    expect(live.slices).toHaveLength(2);
   });
 
   it("is a tile for a single settled model — no pie path", () => {
@@ -299,7 +345,7 @@ describe("modelCostPie", () => {
 });
 
 describe("snapshot spark", () => {
-  it("leaves spark empty when info has no usage_history", () => {
+  it("leaves spark empty when info has no usage_history and no live numbers", () => {
     const snap = buildMonitorSnapshot({
       session: { id: "s1", name: "n", title: null, pending: [], last_turn: null, last_task: null },
     });
@@ -312,6 +358,46 @@ describe("snapshot spark", () => {
     expect(snap.cache.label).toBe(UNSETTLED_LABEL);
     expect(snap.pie.form).toBe("empty");
     expect(snap.pie.label).toBe(UNSETTLED_LABEL);
+  });
+
+  it("draws live status/info numbers and labels 缺数据 when history/ts are missing", () => {
+    const snap = buildMonitorSnapshot({
+      session: {
+        id: "s1",
+        name: "n",
+        title: null,
+        pending: [],
+        last_turn: null,
+        last_task: null,
+        last_kind: "working",
+        cost_usd: 0.27,
+        input_tokens: 100,
+        output_tokens: 20,
+        cache_read_input_tokens: 10,
+        cache_creation_input_tokens: 0,
+      },
+      info: {
+        cost_usd: 0.27,
+        input_tokens: 100,
+        output_tokens: 20,
+        cache_read_input_tokens: 10,
+        cache_creation_input_tokens: 0,
+        model_usage: { "claude-opus-4-6": { cost_usd: 0.27 } },
+      },
+    });
+    expect(snap.freshness.state).toBe("incomplete");
+    expect(snap.freshness.label).toBe(INCOMPLETE_LABEL);
+    expect(snap.freshness.updated_ts).toBeNull();
+    expect(snap.spark.headline).toBe(130);
+    expect(snap.spark.path).toBeNull();
+    expect(snap.spark.label).toBe(INCOMPLETE_LABEL);
+    expect(snap.burn.usd_per_min).toBeNull();
+    expect(snap.burn.label).toBe(INCOMPLETE_LABEL);
+    expect(snap.cache.ratio).toBeCloseTo(10 / 110, 8);
+    expect(snap.cache.label).toBe(INCOMPLETE_LABEL);
+    expect(snap.pie.form).toBe("tile");
+    expect(snap.pie.state).toBe("incomplete");
+    expect(snap.pie.label).toBe(INCOMPLETE_LABEL);
   });
 
   it("does not pull mid-turn task tokens into the spark", () => {

@@ -547,14 +547,19 @@ export function buildMonitorSnapshot(input: MonitorInput): MonitorSnapshot {
   const usage_updated_ts =
     info && "usage_updated_ts" in info ? finiteOrNull(info.usage_updated_ts) : finiteOrNull(session.usage_updated_ts);
   const usage_history = parseUsageHistory(info && "usage_history" in info ? info.usage_history : undefined);
+  const models = modelsFrom(modelRaw);
+  const has_snapshot =
+    [tokens.input_tokens, tokens.output_tokens, tokens.cache_read_input_tokens, tokens.cache_creation_input_tokens, tokens.cost_usd].some(
+      (n) => typeof n === "number" && Number.isFinite(n),
+    ) || models.some((m) => typeof m.cost_usd === "number" && Number.isFinite(m.cost_usd) && m.cost_usd > 0);
   const freshness = usageFreshness({
     usage_updated_ts,
     last_kind: str(session.last_kind) || str(session.state) || "",
+    has_snapshot,
   });
-  const spark = tokenSpark(usage_history, freshness);
+  const spark = tokenSpark(usage_history, freshness, undefined, tokens);
   const burn = burnRate(usage_history, freshness);
-  const cache = cacheHit(usage_history, freshness);
-  const models = modelsFrom(modelRaw);
+  const cache = cacheHit(usage_history, freshness, tokens);
   const pie = modelCostPie(models, freshness);
 
   return {

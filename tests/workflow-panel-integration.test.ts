@@ -9,7 +9,13 @@ import {
   taskStatusLabel,
   tokenBarShares,
 } from "../web/src/lib/workflow-monitor.js";
-import { formatBurnRate, formatCacheHit, STALE_LABEL, UNSETTLED_LABEL } from "../web/src/lib/usage-viz.js";
+import {
+  formatBurnRate,
+  formatCacheHit,
+  INCOMPLETE_LABEL,
+  STALE_LABEL,
+  UNSETTLED_LABEL,
+} from "../web/src/lib/usage-viz.js";
 
 
 /** Shapes taken from WF-COVERAGE.md / wf-evidence.json — host RPC, not invented. */
@@ -85,17 +91,19 @@ describe("panel integration: snapshot → labels a Chinese operator would see", 
     expect(tokenBarShares(snap.tokens).map((s) => s.key)).toEqual(["input", "output", "cache"]);
     expect(snap.agents).toHaveLength(2);
     expect(snap.pending).toBe(1);
-    expect(snap.spark.label).toBe(UNSETTLED_LABEL);
-    expect(snap.spark.headline).toBeNull();
-    expect(snap.burn.label).toBe(UNSETTLED_LABEL);
+    expect(snap.spark.label).toBe(INCOMPLETE_LABEL);
+    expect(snap.spark.headline).toBe(46542 + 1490 + 256);
+    expect(snap.spark.path).toBeNull();
+    expect(snap.burn.label).toBe(INCOMPLETE_LABEL);
     expect(snap.burn.usd_per_min).toBeNull();
     expect(formatBurnRate(snap.burn.usd_per_min)).toBe("—");
-    expect(snap.freshness.state).toBe("unsettled");
-    expect(snap.freshness.label).toBe(UNSETTLED_LABEL);
-    expect(snap.cache.ratio).toBeNull();
-    expect(snap.cache.label).toBe(UNSETTLED_LABEL);
+    expect(snap.freshness.state).toBe("incomplete");
+    expect(snap.freshness.label).toBe(INCOMPLETE_LABEL);
+    expect(snap.cache.ratio).toBeCloseTo(256 / (46542 + 256 + 0), 8);
+    expect(snap.cache.label).toBe(INCOMPLETE_LABEL);
+    expect(formatCacheHit(snap.cache.ratio)).toMatch(/^\d+%$/);
     expect(snap.pie.form).toBe("empty");
-    expect(snap.pie.label).toBe(UNSETTLED_LABEL);
+    expect(snap.pie.label).toBe(INCOMPLETE_LABEL);
   });
 
   it("token spark uses only Result history; working without a new result is stale", () => {
@@ -193,20 +201,28 @@ describe("panel integration: snapshot → labels a Chinese operator would see", 
     expect(rows[2]).toMatchObject({ type: "assistant", text: "**WS.** done" });
   });
 
-  it("working without a Result hides model_usage even if the host still has numbers", () => {
+  it("working without history/ts still draws live model_usage and labels 缺数据", () => {
     const snap = buildMonitorSnapshot({
       session: { ...session, last_kind: "working" },
       info: {
+        cost_usd: 0.270088,
+        input_tokens: 46542,
+        output_tokens: 1490,
+        cache_read_input_tokens: 256,
+        cache_creation_input_tokens: 0,
         model_usage: {
           "claude-opus-4-6": { cost_usd: 0.18, input_tokens: 100 },
           "claude-sonnet-4-6": { cost_usd: 0.09, input_tokens: 40 },
         },
       },
     });
-    expect(snap.freshness.state).toBe("unsettled");
-    expect(snap.pie.form).toBe("empty");
-    expect(snap.pie.slices).toEqual([]);
-    expect(snap.pie.label).toBe(UNSETTLED_LABEL);
+    expect(snap.freshness.state).toBe("incomplete");
+    expect(snap.freshness.label).toBe(INCOMPLETE_LABEL);
+    expect(snap.pie.form).toBe("pie");
+    expect(snap.pie.state).toBe("incomplete");
+    expect(snap.pie.slices).toHaveLength(2);
+    expect(snap.pie.label).toBe(INCOMPLETE_LABEL);
+    expect(snap.pie.total).toBeCloseTo(0.27, 8);
   });
 
   it("turn_done with two model costs draws a pie", () => {

@@ -3,8 +3,9 @@
 export const UNSETTLED_LABEL = "尚未结算";
 export const STALE_LABEL = "过期";
 export const SETTLED_LABEL = "已结算";
+export const INCOMPLETE_LABEL = "缺数据";
 
-export type FreshnessState = "unsettled" | "stale" | "settled";
+export type FreshnessState = "unsettled" | "stale" | "settled" | "incomplete";
 
 export type Freshness = {
   state: FreshnessState;
@@ -97,15 +98,46 @@ export function pointTokens(p: HistoryPoint): number {
   return p.input_tokens + p.output_tokens + p.cache_read_input_tokens + p.cache_creation_input_tokens;
 }
 
+export type LiveUsage = {
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  cache_read_input_tokens?: number | null;
+  cache_creation_input_tokens?: number | null;
+};
+
+function liveFinite(live: object, key: string): number | null {
+  if (!own(live, key)) return null;
+  const v = (live as Record<string, unknown>)[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+export function liveTokenTotal(live?: LiveUsage | null): number | null {
+  if (!live || typeof live !== "object") return null;
+  const keys = ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"] as const;
+  let any = false;
+  let sum = 0;
+  for (const k of keys) {
+    const n = liveFinite(live, k);
+    if (n === null) continue;
+    any = true;
+    sum += n;
+  }
+  return any ? sum : null;
+}
+
 export function usageFreshness(input: {
   usage_updated_ts?: number | null;
   last_kind?: string | null;
+  has_snapshot?: boolean;
 }): Freshness {
   const ts =
     typeof input.usage_updated_ts === "number" && Number.isFinite(input.usage_updated_ts)
       ? input.usage_updated_ts
       : null;
   if (ts === null) {
+    if (input.has_snapshot) {
+      return { state: "incomplete", label: INCOMPLETE_LABEL, updated_ts: null };
+    }
     return { state: "unsettled", label: UNSETTLED_LABEL, updated_ts: null };
   }
   const kind = typeof input.last_kind === "string" ? input.last_kind : "";
@@ -149,27 +181,50 @@ export function tokenSpark(
   history: unknown,
   freshness: Freshness,
   size?: { width?: number; height?: number },
+  live?: LiveUsage | null,
 ): TokenSpark {
   const width = size?.width ?? SPARK_W;
   const height = size?.height ?? SPARK_H;
+  const empty = (state: FreshnessState, label: string): TokenSpark => ({
+    state,
+    label,
+    headline: null,
+    points: [],
+    path: null,
+    last: null,
+    width,
+    height,
+  });
+  if (freshness.state === "unsettled") return empty("unsettled", UNSETTLED_LABEL);
   const points = parseUsageHistory(history).map((p) => ({ ts: p.ts, tokens: pointTokens(p) }));
-  if (!points.length || freshness.state === "unsettled") {
+  if (!points.length) {
+    const headline = freshness.state === "incomplete" ? liveTokenTotal(live) : null;
+    if (headline === null) {
+      return empty(
+        freshness.state === "incomplete" ? "incomplete" : "unsettled",
+        freshness.state === "incomplete" ? INCOMPLETE_LABEL : UNSETTLED_LABEL,
+      );
+    }
+    const fallback = [{ ts: 0, tokens: headline }];
+    const layout = sparkLayout(fallback, width, height);
     return {
-      state: "unsettled",
-      label: UNSETTLED_LABEL,
-      headline: null,
-      points: [],
+      state: "incomplete",
+      label: INCOMPLETE_LABEL,
+      headline,
+      points: fallback,
       path: null,
-      last: null,
+      last: layout.last,
       width,
       height,
     };
   }
   const layout = sparkLayout(points, width, height);
   const headline = points[points.length - 1].tokens;
+  const label =
+    freshness.state === "stale" ? STALE_LABEL : freshness.state === "incomplete" ? INCOMPLETE_LABEL : SETTLED_LABEL;
   return {
     state: freshness.state,
-    label: freshness.state === "stale" ? STALE_LABEL : SETTLED_LABEL,
+    label,
     headline,
     points,
     path: layout.path,
@@ -181,31 +236,37 @@ export function tokenSpark(
 
 export function sparkClass(state: FreshnessState): string {
   if (state === "stale") return "spark stale";
+  if (state === "incomplete") return "spark incomplete";
   if (state === "unsettled") return "spark empty";
   return "spark";
 }
 
 /** Adjacent settled costs only. Never wall-clock extrapolate. */
 export function burnRate(history: unknown, freshness: Freshness): BurnRate {
-  const points = parseUsageHistory(history);
-  if (points.length < 2) {
+  const missing = (): BurnRate => {
+    if (freshness.state === "incomplete") {
+      return { state: "incomplete", label: INCOMPLETE_LABEL, usd_per_min: null };
+    }
     return { state: "unsettled", label: UNSETTLED_LABEL, usd_per_min: null };
-  }
+  };
+  const points = parseUsageHistory(history);
+  if (points.length < 2) return missing();
   const prev = points[points.length - 2];
   const last = points[points.length - 1];
   const dt = last.ts - prev.ts;
   if (!(dt > 0) || !Number.isFinite(prev.cost_usd) || !Number.isFinite(last.cost_usd)) {
-    return { state: "unsettled", label: UNSETTLED_LABEL, usd_per_min: null };
+    return missing();
   }
   const usd_per_min = ((last.cost_usd - prev.cost_usd) / dt) * 60;
-  if (!Number.isFinite(usd_per_min)) {
-    return { state: "unsettled", label: UNSETTLED_LABEL, usd_per_min: null };
-  }
+  if (!Number.isFinite(usd_per_min)) return missing();
   if (freshness.state === "unsettled") {
     return { state: "unsettled", label: UNSETTLED_LABEL, usd_per_min: null };
   }
   if (freshness.state === "stale") {
     return { state: "stale", label: STALE_LABEL, usd_per_min };
+  }
+  if (freshness.state === "incomplete") {
+    return { state: "incomplete", label: INCOMPLETE_LABEL, usd_per_min };
   }
   return { state: "settled", label: SETTLED_LABEL, usd_per_min };
 }
@@ -220,35 +281,73 @@ export function formatBurnRate(usdPerMin: number | null | undefined): string {
 
 export function freshnessClass(state: FreshnessState): string {
   if (state === "stale") return "pill freshness stale";
+  if (state === "incomplete") return "pill freshness incomplete";
   if (state === "unsettled") return "pill freshness unsettled";
   return "pill freshness settled";
 }
 
 export function isFreshnessClass(cls: string): boolean {
-  return cls === "pill freshness settled" || cls === "pill freshness stale" || cls === "pill freshness unsettled";
+  return (
+    cls === "pill freshness settled" ||
+    cls === "pill freshness stale" ||
+    cls === "pill freshness incomplete" ||
+    cls === "pill freshness unsettled"
+  );
 }
 
 export function isBurnClass(cls: string): boolean {
-  return cls === "burn" || cls === "burn stale";
+  return cls === "burn" || cls === "burn stale" || cls === "burn incomplete";
 }
 
-/** cache_read / (input + cache_read + cache_creation) from the last Result only. */
-export function cacheHit(history: unknown, freshness: Freshness): CacheHit {
-  const empty: CacheHit = { state: "unsettled", label: UNSETTLED_LABEL, ratio: null, read: 0, billed: 0 };
-  const points = parseUsageHistory(history);
-  if (!points.length || freshness.state === "unsettled") return empty;
-  const last = points[points.length - 1];
-  const read = last.cache_read_input_tokens;
-  const billed = last.input_tokens + last.cache_read_input_tokens + last.cache_creation_input_tokens;
-  if (!(billed > 0) || !Number.isFinite(read) || !Number.isFinite(billed)) {
-    return { ...empty, state: freshness.state === "stale" ? "stale" : "unsettled", label: freshness.state === "stale" ? STALE_LABEL : UNSETTLED_LABEL };
-  }
+function cacheFromParts(read: number, input: number, creation: number): { ratio: number; read: number; billed: number } | null {
+  const billed = input + read + creation;
+  if (!(billed > 0) || !Number.isFinite(read) || !Number.isFinite(billed)) return null;
   const ratio = read / billed;
-  if (!Number.isFinite(ratio)) return empty;
-  if (freshness.state === "stale") {
-    return { state: "stale", label: STALE_LABEL, ratio, read, billed };
+  if (!Number.isFinite(ratio)) return null;
+  return { ratio, read, billed };
+}
+
+/** cache_read / (input + cache_read + cache_creation) from the last Result, else live snapshot. */
+export function cacheHit(history: unknown, freshness: Freshness, live?: LiveUsage | null): CacheHit {
+  const empty = (state: FreshnessState, label: string): CacheHit => ({
+    state,
+    label,
+    ratio: null,
+    read: 0,
+    billed: 0,
+  });
+  if (freshness.state === "unsettled") return empty("unsettled", UNSETTLED_LABEL);
+  const points = parseUsageHistory(history);
+  if (points.length) {
+    const last = points[points.length - 1];
+    const parts = cacheFromParts(last.cache_read_input_tokens, last.input_tokens, last.cache_creation_input_tokens);
+    if (!parts) {
+      return empty(
+        freshness.state === "stale" ? "stale" : freshness.state === "incomplete" ? "incomplete" : "unsettled",
+        freshness.state === "stale" ? STALE_LABEL : freshness.state === "incomplete" ? INCOMPLETE_LABEL : UNSETTLED_LABEL,
+      );
+    }
+    if (freshness.state === "stale") return { state: "stale", label: STALE_LABEL, ...parts };
+    if (freshness.state === "incomplete") return { state: "incomplete", label: INCOMPLETE_LABEL, ...parts };
+    return { state: "settled", label: SETTLED_LABEL, ...parts };
   }
-  return { state: "settled", label: SETTLED_LABEL, ratio, read, billed };
+  if (freshness.state !== "incomplete" || !live || typeof live !== "object") {
+    return empty(
+      freshness.state === "incomplete" ? "incomplete" : "unsettled",
+      freshness.state === "incomplete" ? INCOMPLETE_LABEL : UNSETTLED_LABEL,
+    );
+  }
+  const read = liveFinite(live, "cache_read_input_tokens") ?? 0;
+  const input = liveFinite(live, "input_tokens") ?? 0;
+  const creation = liveFinite(live, "cache_creation_input_tokens") ?? 0;
+  const any =
+    liveFinite(live, "cache_read_input_tokens") !== null ||
+    liveFinite(live, "input_tokens") !== null ||
+    liveFinite(live, "cache_creation_input_tokens") !== null;
+  if (!any) return empty("incomplete", INCOMPLETE_LABEL);
+  const parts = cacheFromParts(read, input, creation);
+  if (!parts) return empty("incomplete", INCOMPLETE_LABEL);
+  return { state: "incomplete", label: INCOMPLETE_LABEL, ...parts };
 }
 
 export function formatCacheHit(ratio: number | null | undefined): string {
@@ -258,16 +357,22 @@ export function formatCacheHit(ratio: number | null | undefined): string {
 
 export function cacheMeterClass(state: FreshnessState): string {
   if (state === "stale") return "cache-meter stale";
+  if (state === "incomplete") return "cache-meter incomplete";
   if (state === "unsettled") return "cache-meter empty";
   return "cache-meter";
 }
 
 export function isCacheMeterClass(cls: string): boolean {
-  return cls === "cache-meter" || cls === "cache-meter stale" || cls === "cache-meter empty";
+  return (
+    cls === "cache-meter" ||
+    cls === "cache-meter stale" ||
+    cls === "cache-meter incomplete" ||
+    cls === "cache-meter empty"
+  );
 }
 
 export function isSparkClass(cls: string): boolean {
-  return cls === "spark" || cls === "spark stale" || cls === "spark empty";
+  return cls === "spark" || cls === "spark stale" || cls === "spark incomplete" || cls === "spark empty";
 }
 
 export function ownHistoryKeys(p: HistoryPoint): string[] {
@@ -325,18 +430,26 @@ export function isPieSliceClass(cls: string): boolean {
 
 export function pieWrapClass(state: FreshnessState): string {
   if (state === "stale") return "pie-wrap stale";
+  if (state === "incomplete") return "pie-wrap incomplete";
   if (state === "unsettled") return "pie-wrap empty";
   return "pie-wrap";
 }
 
 export function isPieWrapClass(cls: string): boolean {
-  return cls === "pie-wrap" || cls === "pie-wrap stale" || cls === "pie-wrap empty";
+  return cls === "pie-wrap" || cls === "pie-wrap stale" || cls === "pie-wrap incomplete" || cls === "pie-wrap empty";
+}
+
+function freshnessLabel(state: FreshnessState): string {
+  if (state === "stale") return STALE_LABEL;
+  if (state === "incomplete") return INCOMPLETE_LABEL;
+  if (state === "settled") return SETTLED_LABEL;
+  return UNSETTLED_LABEL;
 }
 
 function emptyPie(state: FreshnessState = "unsettled"): ModelCostPie {
   return {
     state,
-    label: state === "stale" ? STALE_LABEL : UNSETTLED_LABEL,
+    label: freshnessLabel(state),
     form: "empty",
     total: null,
     slices: [],
@@ -400,7 +513,7 @@ export function modelCostPie(models: unknown, freshness: Freshness): ModelCostPi
   if (freshness.state === "unsettled") return emptyPie("unsettled");
   const parsed = parseModelCosts(models);
   if (!parsed.length) {
-    return emptyPie(freshness.state === "stale" ? "stale" : "unsettled");
+    return emptyPie(freshness.state === "stale" ? "stale" : freshness.state === "incomplete" ? "incomplete" : "unsettled");
   }
   const named = parsed.slice(0, 3);
   const folded = parsed.slice(3);
@@ -414,7 +527,7 @@ export function modelCostPie(models: unknown, freshness: Freshness): ModelCostPi
   }
   const total = raw.reduce((a, s) => a + s.cost_usd, 0);
   if (!(total > 0) || !Number.isFinite(total)) {
-    return emptyPie(freshness.state === "stale" ? "stale" : "unsettled");
+    return emptyPie(freshness.state === "stale" ? "stale" : freshness.state === "incomplete" ? "incomplete" : "unsettled");
   }
   const slices: PieSlice[] = raw.map((s) => ({
     key: s.key,
@@ -424,8 +537,9 @@ export function modelCostPie(models: unknown, freshness: Freshness): ModelCostPi
     slot: s.slot,
     className: pieSliceClass(s.slot),
   }));
-  const state: FreshnessState = freshness.state === "stale" ? "stale" : "settled";
-  const label = state === "stale" ? STALE_LABEL : SETTLED_LABEL;
+  const state: FreshnessState =
+    freshness.state === "stale" ? "stale" : freshness.state === "incomplete" ? "incomplete" : "settled";
+  const label = freshnessLabel(state);
   if (slices.length === 1) {
     return { state, label, form: "tile", total, slices, paths: [], width: PIE_W, height: PIE_H };
   }

@@ -91,9 +91,14 @@ export function WorkflowPanel(props: {
         </div>
         <div className="mon-cost">
           <div title="cost_usd">{formatUsd(snap.tokens.cost_usd)}</div>
-          <div className={`burn${snap.burn.state === "stale" ? " stale" : ""}`} title="已结算 Δcost / Δt">
+          <div
+            className={`burn${snap.burn.state === "stale" ? " stale" : snap.burn.state === "incomplete" ? " incomplete" : ""}`}
+            title="已结算 Δcost / Δt"
+          >
             {snap.burn.usd_per_min == null ? snap.burn.label : formatBurnRate(snap.burn.usd_per_min)}
-            {snap.burn.state === "stale" && snap.burn.usd_per_min != null ? ` · ${snap.burn.label}` : ""}
+            {(snap.burn.state === "stale" || snap.burn.state === "incomplete") && snap.burn.usd_per_min != null
+              ? ` · ${snap.burn.label}`
+              : ""}
           </div>
         </div>
       </header>
@@ -148,7 +153,7 @@ export function WorkflowPanel(props: {
               <span className="cache-fill" style={{ width: `${Math.max(0, Math.min(100, snap.cache.ratio * 100))}%` }} />
             ) : null}
           </div>
-          {snap.cache.state === "stale" && snap.cache.ratio != null ? (
+          {snap.cache.state === "stale" || snap.cache.state === "incomplete" ? (
             <div className="leg mute">{snap.cache.label}</div>
           ) : null}
         </div>
@@ -179,7 +184,9 @@ export function WorkflowPanel(props: {
           ) : (
             <div className={sparkClass("unsettled")} />
           )}
-          {snap.spark.state === "stale" ? <div className="leg mute">{snap.spark.label}</div> : null}
+          {snap.spark.state === "stale" || snap.spark.state === "incomplete" ? (
+            <div className="leg mute">{snap.spark.label}</div>
+          ) : null}
           <dl className="kv">
             <div>
               <dt>输入</dt>
@@ -233,7 +240,9 @@ export function WorkflowPanel(props: {
               </ul>
             </>
           )}
-          {snap.pie.state === "stale" ? <div className="leg mute">{snap.pie.label}</div> : null}
+          {snap.pie.state === "stale" || snap.pie.state === "incomplete" ? (
+            <div className="leg mute">{snap.pie.label}</div>
+          ) : null}
         </div>
       )}
 

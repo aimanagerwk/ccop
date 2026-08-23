@@ -56,6 +56,7 @@ describe("usage-viz security", () => {
   it("spark SVG class stays on the allowlist", () => {
     expect(isSparkClass(sparkClass("settled"))).toBe(true);
     expect(isSparkClass(sparkClass("stale"))).toBe(true);
+    expect(isSparkClass(sparkClass("incomplete"))).toBe(true);
     expect(isSparkClass(sparkClass("unsettled"))).toBe(true);
     expect(isSparkClass("spark onerror=alert(1)")).toBe(false);
   });
@@ -124,10 +125,12 @@ describe("usage-viz security", () => {
   it("freshness / burn class names stay on the allowlist", () => {
     expect(isFreshnessClass(freshnessClass("settled"))).toBe(true);
     expect(isFreshnessClass(freshnessClass("stale"))).toBe(true);
+    expect(isFreshnessClass(freshnessClass("incomplete"))).toBe(true);
     expect(isFreshnessClass(freshnessClass("unsettled"))).toBe(true);
     expect(isFreshnessClass("pill freshness settled onerror=alert(1)")).toBe(false);
     expect(isBurnClass("burn")).toBe(true);
     expect(isBurnClass("burn stale")).toBe(true);
+    expect(isBurnClass("burn incomplete")).toBe(true);
     expect(isBurnClass("burn stale onclick=alert(1)")).toBe(false);
   });
 
@@ -169,6 +172,7 @@ describe("usage-viz security", () => {
   it("cache meter class stays on the allowlist and format never emits markup", () => {
     expect(isCacheMeterClass(cacheMeterClass("settled"))).toBe(true);
     expect(isCacheMeterClass(cacheMeterClass("stale"))).toBe(true);
+    expect(isCacheMeterClass(cacheMeterClass("incomplete"))).toBe(true);
     expect(isCacheMeterClass(cacheMeterClass("unsettled"))).toBe(true);
     expect(isCacheMeterClass("cache-meter onerror=alert(1)")).toBe(false);
     expect(formatCacheHit(0.5)).toBe("50%");
@@ -204,6 +208,7 @@ describe("usage-viz security", () => {
     expect(isPieSliceClass("pie-slice s1 onerror=alert(1)")).toBe(false);
     expect(isPieWrapClass(pieWrapClass("settled"))).toBe(true);
     expect(isPieWrapClass(pieWrapClass("stale"))).toBe(true);
+    expect(isPieWrapClass(pieWrapClass("incomplete"))).toBe(true);
     expect(isPieWrapClass(pieWrapClass("unsettled"))).toBe(true);
     expect(isPieWrapClass("pie-wrap onclick=alert(1)")).toBe(false);
     const pie = modelCostPie(
