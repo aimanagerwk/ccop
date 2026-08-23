@@ -258,6 +258,47 @@ describe("timeline-filter security", () => {
     expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
   });
 
+  it("a lone regional letter cannot match every flag; complete flags still match themselves", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const letterC = "\u{1F1E8}";
+    const letterN = "\u{1F1F3}";
+    const src = readFileSync(new URL("../web/src/lib/timeline-filter.ts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/new RegExp/);
+    expect(src).not.toMatch(/RegExp\s*\(/);
+    expect(haystackHas(china, letterC)).toBe(false);
+    expect(haystackHas(canada, letterC)).toBe(false);
+    expect(haystackHas(us, letterC)).toBe(false);
+    expect(haystackHas(china, letterN)).toBe(false);
+    expect(haystackHas(china, china)).toBe(true);
+    expect(filterRows([{ type: "user", text: canada }], { q: letterC })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: letterC })).toEqual([]);
+    expect(filterRows([{ type: "user", text: us }], { q: letterC })).toEqual([]);
+    expect(filterRows([{ type: "user", text: canada }, { type: "user", text: china }, { type: "user", text: us }], { q: letterN })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
+  it("200x then a half or full flag cannot match another padded flag via a dropped tail", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const letter = "\u{1F1E8}";
+    const prefix = "x".repeat(200);
+    const qHalf = `${prefix}${letter}`;
+    const qFull = `${prefix}${china}`;
+    const src = readFileSync(new URL("../web/src/lib/timeline-filter.ts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/new RegExp/);
+    expect(src).not.toMatch(/RegExp\s*\(/);
+    expect(filterRows([{ type: "user", text: `${prefix}${canada}` }], { q: qHalf })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${prefix}${us}` }], { q: qHalf })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${prefix}${canada}` }], { q: qFull })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${prefix}${us}` }], { q: qFull })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(198)}${canada}` }], { q: `${"x".repeat(198)}${letter}` })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(199)}${canada}` }], { q: `${"x".repeat(199)}${letter}` })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
   it("195x U+00AD plus needle is the full word, not needl or a SHY-only needle", () => {
     const q = `${"­".repeat(195)}needle`;
     const s = sanitizeQuery({ q });

@@ -16,6 +16,8 @@ export type FilterQuery = {
 export type SanitizedQuery = {
   needle: string;
   types: ReadonlySet<FoldedRow["type"]> | null;
+  /** Regional indicators clipped off an over-budget query. Absent when none. */
+  droppedRegional?: string;
 };
 
 const ROW_TYPES = new Set<FoldedRow["type"]>([
@@ -168,10 +170,26 @@ function isUnpairedRegionalGrapheme(s: string, start: number, end: number): bool
   return second === undefined || !isRegionalIndicator(second) || start + codePointWidth(first) + codePointWidth(second) > end;
 }
 
+/** Leading run of regional indicators after a clip point (half or full flags). */
+function leadingRegionalSequence(s: string): string {
+  let i = 0;
+  while (i < s.length) {
+    const cp = codePointAt(s, i);
+    if (cp === undefined || !isRegionalIndicator(cp)) break;
+    i += codePointWidth(cp);
+  }
+  return s.slice(0, i);
+}
+
+type NormalizedNeedle = {
+  needle: string;
+  droppedRegional: string;
+};
+
 /** NFC + strip fillers + trim, then clip on grapheme / word bounds. */
-function normalizeNeedle(q: string): string {
+function normalizeNeedle(q: string): NormalizedNeedle {
   const s = stripFillers(q.normalize("NFC")).trim();
-  if (s.length <= QUERY_MAX_LEN) return s;
+  if (s.length <= QUERY_MAX_LEN) return { needle: s, droppedRegional: "" };
   let end = 0;
   while (end < s.length) {
     const next = graphemeEnd(s, end);
@@ -189,7 +207,8 @@ function normalizeNeedle(q: string): string {
   if (end < s.length && /\S/.test(s.charAt(end)) && /\S$/.test(clipped) && /\s/.test(clipped)) {
     clipped = clipped.replace(/\s+\S+$/, "");
   }
-  return clipped;
+  const droppedRegional = leadingRegionalSequence(s.slice(clipped.length));
+  return { needle: clipped, droppedRegional };
 }
 
 function ownType(row: unknown): FoldedRow["type"] | undefined {
@@ -257,10 +276,13 @@ export function sanitizeQuery(raw: FilterQuery | unknown): SanitizedQuery {
     return { needle: "", types: null };
   }
   let needle = "";
+  let droppedRegional = "";
   if (own(raw, "q")) {
     const q = (raw as { q?: unknown }).q;
     if (typeof q === "string") {
-      needle = normalizeNeedle(q);
+      const normalized = normalizeNeedle(q);
+      needle = normalized.needle;
+      droppedRegional = normalized.droppedRegional;
     }
   }
   let types: Set<FoldedRow["type"]> | null = null;
@@ -277,6 +299,7 @@ export function sanitizeQuery(raw: FilterQuery | unknown): SanitizedQuery {
       if (allowed.size > 0) types = allowed;
     }
   }
+  if (droppedRegional) return { needle, types, droppedRegional };
   return { needle, types };
 }
 
@@ -297,11 +320,72 @@ function hasUnpairedRegionalIndicator(s: string): boolean {
   return pending;
 }
 
+function containsRegionalIndicator(s: string): boolean {
+  let i = 0;
+  while (i < s.length) {
+    const cp = codePointAt(s, i);
+    if (cp === undefined) break;
+    if (isRegionalIndicator(cp)) return true;
+    i += codePointWidth(cp);
+  }
+  return false;
+}
+
+/** Advance one atom: a complete RI pair, or a single non-RI code point. */
+function atomEnd(s: string, i: number): number {
+  const cp = codePointAt(s, i);
+  if (cp === undefined) return i;
+  const w = codePointWidth(cp);
+  if (isRegionalIndicator(cp)) {
+    const next = codePointAt(s, i + w);
+    if (next !== undefined && isRegionalIndicator(next)) return i + w + codePointWidth(next);
+  }
+  return i + w;
+}
+
+function riAwareIncludes(haystack: string, needle: string): boolean {
+  const hay = haystack.toLowerCase();
+  const ned = needle.toLowerCase();
+  if (ned.length === 0) return true;
+  let start = 0;
+  while (start < hay.length) {
+    let hi = start;
+    let ni = 0;
+    let ok = true;
+    while (ni < ned.length) {
+      if (hi >= hay.length) {
+        ok = false;
+        break;
+      }
+      const ncp = codePointAt(ned, ni);
+      const hcp = codePointAt(hay, hi);
+      if (ncp === undefined || hcp === undefined) {
+        ok = false;
+        break;
+      }
+      const nEnd = atomEnd(ned, ni);
+      const hEnd = atomEnd(hay, hi);
+      if (nEnd - ni !== hEnd - hi || ned.slice(ni, nEnd) !== hay.slice(hi, hEnd)) {
+        ok = false;
+        break;
+      }
+      ni = nEnd;
+      hi = hEnd;
+    }
+    if (ok) return true;
+    start = atomEnd(hay, start);
+  }
+  return false;
+}
+
 export function haystackHas(haystack: string, needle: string): boolean {
   if (needle === "") return true;
   if (typeof haystack !== "string") return false;
   if (hasUnpairedRegionalIndicator(needle)) return false;
-  return haystack.toLowerCase().includes(needle.toLowerCase());
+  if (!containsRegionalIndicator(needle)) {
+    return haystack.toLowerCase().includes(needle.toLowerCase());
+  }
+  return riAwareIncludes(haystack, needle);
 }
 
 export function rowVisibleText(row: FoldedRow): string[] {
@@ -359,8 +443,9 @@ export function rowMatches(row: FoldedRow, q: SanitizedQuery): boolean {
   }
   if (!q.needle) return true;
   const texts = rowVisibleText(row);
+  const matchNeedle = q.droppedRegional ? q.needle + q.droppedRegional : q.needle;
   for (let i = 0; i < texts.length; i++) {
-    if (haystackHas(texts[i], q.needle)) return true;
+    if (haystackHas(texts[i], matchNeedle)) return true;
   }
   return false;
 }

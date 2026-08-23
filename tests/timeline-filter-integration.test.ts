@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as classify from "../src/classify.js";
 import type { FoldedRow } from "../web/src/lib/fold-transcript.js";
 import { foldTranscript } from "../web/src/lib/fold-transcript.js";
-import { filterGroups, rowVisibleText, sanitizeQuery } from "../web/src/lib/timeline-filter.js";
+import { filterGroups, filterRows, rowVisibleText, sanitizeQuery } from "../web/src/lib/timeline-filter.js";
 import { groupTurns } from "../web/src/lib/timeline-turn.js";
 
 describe("fold then groupTurns then filterGroups", () => {
@@ -148,6 +148,48 @@ describe("fold then groupTurns then filterGroups", () => {
     expect(sanitizeQuery({ q }).needle.endsWith(letter)).toBe(false);
     expect(filterGroups(groups, { q })).toEqual([]);
     expect(filterGroups(groups, { q: letter })).toEqual([]);
+  });
+
+  it("a lone regional letter does not select 🇨🇦 🇨🇳 or 🇺🇸 turns", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const letterC = "\u{1F1E8}";
+    const letterN = "\u{1F1F3}";
+    const s1 = classify.fromSent({ text: `visit ${canada}` })[0];
+    const done1 = classify.fromResult({ is_error: false, result: "reply-one" });
+    const s2 = classify.fromSent({ text: `visit ${china}` })[0];
+    const done2 = classify.fromResult({ is_error: false, result: "reply-two" });
+    const s3 = classify.fromSent({ text: `visit ${us}` })[0];
+    const groups = groupTurns(foldTranscript([s1, ...done1, s2, ...done2, s3]));
+    expect(filterGroups(groups, { q: letterC })).toEqual([]);
+    expect(filterGroups(groups, { q: letterN })).toEqual([]);
+    const filtered = filterGroups(groups, { q: china });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(china))).toBe(true);
+  });
+
+  it("200x then a half or full flag does not select another padded flag turn", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const letter = "\u{1F1E8}";
+    const prefix = "x".repeat(200);
+    const s1 = classify.fromSent({ text: `${prefix}${canada}` })[0];
+    const done1 = classify.fromResult({ is_error: false, result: "reply-one" });
+    const s2 = classify.fromSent({ text: `${prefix}${us}` })[0];
+    const done2 = classify.fromResult({ is_error: false, result: "reply-two" });
+    const s3 = classify.fromSent({ text: `${prefix}${china}` })[0];
+    const groups = groupTurns(foldTranscript([s1, ...done1, s2, ...done2, s3]));
+    expect(filterGroups(groups, { q: `${prefix}${letter}` })).toEqual([]);
+    expect(
+      filterGroups(groups, { q: `${prefix}${china}` }).some((g) =>
+        g.rows.some((r) => r.type === "user" && (r.text.includes(canada) || r.text.includes(us))),
+      ),
+    ).toBe(false);
+    // fromSent clips summaries at 200 units, so the folded rows no longer
+    // contain the flag. Complete 🇨🇳 must still match a row that kept it.
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
   });
 
   it("195x U+00AD + alpha-turn-unique keeps only that turn and not a truncated word", () => {

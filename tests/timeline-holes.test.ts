@@ -119,6 +119,71 @@ describe("holes / unit", () => {
     expect(filterRows([{ type: "user", text: china }], { q: letter })).toEqual([]);
   });
 
+  it("a lone regional letter cannot match any complete flag", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const letterC = "\u{1F1E8}";
+    const letterN = "\u{1F1F3}";
+    expect(haystackHas(china, letterC)).toBe(false);
+    expect(haystackHas(canada, letterC)).toBe(false);
+    expect(haystackHas(us, letterC)).toBe(false);
+    expect(haystackHas(china, letterN)).toBe(false);
+    expect(haystackHas(canada, letterN)).toBe(false);
+    expect(haystackHas(us, letterN)).toBe(false);
+    expect(haystackHas(china, china)).toBe(true);
+    expect(haystackHas(canada, canada)).toBe(true);
+    expect(filterRows([{ type: "user", text: canada }], { q: letterC })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: letterC })).toEqual([]);
+    expect(filterRows([{ type: "user", text: us }], { q: letterC })).toEqual([]);
+    expect(filterRows([{ type: "user", text: canada }], { q: letterN })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: letterN })).toEqual([]);
+    expect(filterRows([{ type: "user", text: us }], { q: letterN })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
+  it("200 x's then a half flag cannot match another padded flag via the leftover prefix", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const letter = "\u{1F1E8}";
+    const prefix = "x".repeat(200);
+    const qHalf = `${prefix}${letter}`;
+    const qFull = `${prefix}${china}`;
+    expect(qHalf.length).toBe(202);
+    expect(qFull.length).toBe(204);
+    const paddedCanada: FoldedRow = { type: "user", text: `${prefix}${canada}` };
+    const paddedUs: FoldedRow = { type: "user", text: `${prefix}${us}` };
+    const paddedChina: FoldedRow = { type: "user", text: `${prefix}${china}` };
+    expect(haystackHas(paddedCanada.text, letter)).toBe(false);
+    expect(haystackHas(paddedUs.text, letter)).toBe(false);
+    expect(filterRows([paddedCanada, paddedUs, paddedChina], { q: qHalf })).toEqual([]);
+    expect(filterRows([paddedCanada], { q: qHalf })).toEqual([]);
+    expect(filterRows([paddedUs], { q: qHalf })).toEqual([]);
+    expect(filterRows([paddedCanada], { q: qFull })).toEqual([]);
+    expect(filterRows([paddedUs], { q: qFull })).toEqual([]);
+    expect(filterRows([{ type: "user", text: canada }], { q: qHalf })).toEqual([]);
+    expect(filterRows([{ type: "user", text: us }], { q: qFull })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+    expect(filterRows([paddedCanada], { q: prefix }).length).toBe(1);
+  });
+
+  it("198x+🇨 and 199x+🇨 cannot prefix-match a padded Canada flag", () => {
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const letter = "\u{1F1E8}";
+    const q198 = `${"x".repeat(198)}${letter}`;
+    const q199 = `${"x".repeat(199)}${letter}`;
+    const padded198: FoldedRow = { type: "user", text: `${"x".repeat(198)}${canada}` };
+    const padded199: FoldedRow = { type: "user", text: `${"x".repeat(199)}${canada}` };
+    expect(haystackHas(padded198.text, letter)).toBe(false);
+    expect(haystackHas(padded199.text, letter)).toBe(false);
+    expect(filterRows([padded198], { q: q198 })).toEqual([]);
+    expect(filterRows([padded199], { q: q199 })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(198)}${china}` }], { q: q198 })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
   it("sanitizeQuery strips soft hyphens before clipping so the trailing word survives", () => {
     const q = `${"­".repeat(195)}needle`;
     const { needle } = sanitizeQuery({ q });
@@ -572,6 +637,44 @@ describe("holes / security", () => {
     expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
   });
 
+  it("a lone regional letter is not a wildcard for every flag row", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const letterC = "\u{1F1E8}";
+    const letterN = "\u{1F1F3}";
+    expect(haystackHas(china, letterC)).toBe(false);
+    expect(haystackHas(canada, letterC)).toBe(false);
+    expect(haystackHas(us, letterC)).toBe(false);
+    expect(haystackHas(china, letterN)).toBe(false);
+    expect(filterRows([{ type: "user", text: canada }], { q: letterC })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: letterC })).toEqual([]);
+    expect(filterRows([{ type: "user", text: us }], { q: letterC })).toEqual([]);
+    expect(filterRows([{ type: "user", text: canada }, { type: "user", text: china }, { type: "user", text: us }], { q: letterN })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
+  it("filling the budget then appending a half or full flag cannot hit another padded flag", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const letter = "\u{1F1E8}";
+    const prefix = "x".repeat(200);
+    const qHalf = `${prefix}${letter}`;
+    const qFull = `${prefix}${china}`;
+    const src = readFileSync(new URL("../web/src/lib/timeline-filter.ts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/new RegExp/);
+    expect(src).not.toMatch(/RegExp\s*\(/);
+    expect(filterRows([{ type: "user", text: `${prefix}${canada}` }], { q: qHalf })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${prefix}${us}` }], { q: qHalf })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${prefix}${canada}` }], { q: qFull })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${prefix}${us}` }], { q: qFull })).toEqual([]);
+    expect(filterRows([{ type: "user", text: canada }], { q: qHalf })).toEqual([]);
+    expect(filterRows([{ type: "user", text: us }], { q: qFull })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(199)}${canada}` }], { q: `${"x".repeat(199)}${letter}` })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
   it("U+00AD padding cannot eat the budget down to needl or a SHY-only needle", () => {
     const q = `${"­".repeat(195)}needle`;
     const s = sanitizeQuery({ q });
@@ -857,6 +960,57 @@ describe("holes / integration", () => {
     expect(filtered).toHaveLength(1);
     expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(china))).toBe(true);
     expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(canada))).toBe(false);
+  });
+
+  it("filterGroups: a lone regional letter does not keep every flag turn", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const letterC = "\u{1F1E8}";
+    const letterN = "\u{1F1F3}";
+    const s1 = classify.fromSent({ text: `visit ${canada}` })[0];
+    const done1 = classify.fromResult({ is_error: false, result: "reply-one" });
+    const s2 = classify.fromSent({ text: `visit ${china}` })[0];
+    const done2 = classify.fromResult({ is_error: false, result: "reply-two" });
+    const s3 = classify.fromSent({ text: `visit ${us}` })[0];
+    const done3 = classify.fromResult({ is_error: false, result: "reply-three" });
+    const groups = groupTurns(foldTranscript([s1, ...done1, s2, ...done2, s3, ...done3]));
+    expect(filterGroups(groups, { q: letterC })).toEqual([]);
+    expect(filterGroups(groups, { q: letterN })).toEqual([]);
+    const filtered = filterGroups(groups, { q: china });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(china))).toBe(true);
+  });
+
+  it("filterGroups: 200x then a half or full flag must not keep another padded flag turn", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const letter = "\u{1F1E8}";
+    const prefix = "x".repeat(200);
+    const qHalf = `${prefix}${letter}`;
+    const qFull = `${prefix}${china}`;
+    const s1 = classify.fromSent({ text: `${prefix}${canada}` })[0];
+    const done1 = classify.fromResult({ is_error: false, result: "reply-one" });
+    const s2 = classify.fromSent({ text: `${prefix}${us}` })[0];
+    const done2 = classify.fromResult({ is_error: false, result: "reply-two" });
+    const s3 = classify.fromSent({ text: `${prefix}${china}` })[0];
+    const done3 = classify.fromResult({ is_error: false, result: "reply-three" });
+    const groups = groupTurns(foldTranscript([s1, ...done1, s2, ...done2, s3, ...done3]));
+    expect(
+      filterGroups(groups, { q: qHalf }).some((g) =>
+        g.rows.some((r) => r.type === "user" && (r.text.includes(canada) || r.text.includes(us))),
+      ),
+    ).toBe(false);
+    expect(
+      filterGroups(groups, { q: qFull }).some((g) =>
+        g.rows.some((r) => r.type === "user" && (r.text.includes(canada) || r.text.includes(us))),
+      ),
+    ).toBe(false);
+    expect(filterGroups(groups, { q: qHalf })).toEqual([]);
+    // fromSent clips summaries at 200 units, so the folded rows no longer
+    // contain the flag. Complete 🇨🇳 must still match a row that kept it.
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
   });
 
   it("filterGroups: 195x U+00AD + alpha-turn-unique keeps only that turn", () => {

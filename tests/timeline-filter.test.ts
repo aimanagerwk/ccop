@@ -62,6 +62,42 @@ describe("sanitizeQuery", () => {
     expect(filterRows([{ type: "user", text: canada }], { q })).toEqual([]);
   });
 
+  it("a lone regional letter cannot match 🇨🇳 🇨🇦 or 🇺🇸", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const letterC = "\u{1F1E8}";
+    const letterN = "\u{1F1F3}";
+    expect(haystackHas(china, letterC)).toBe(false);
+    expect(haystackHas(canada, letterC)).toBe(false);
+    expect(haystackHas(us, letterC)).toBe(false);
+    expect(haystackHas(china, letterN)).toBe(false);
+    expect(haystackHas(china, china)).toBe(true);
+    expect(filterRows([{ type: "user", text: canada }], { q: letterC })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: letterC })).toEqual([]);
+    expect(filterRows([{ type: "user", text: us }], { q: letterC })).toEqual([]);
+    expect(filterRows([{ type: "user", text: canada }], { q: letterN })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
+  it("200x then a half or full flag cannot match another padded flag", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const letter = "\u{1F1E8}";
+    const prefix = "x".repeat(200);
+    const qHalf = `${prefix}${letter}`;
+    const qFull = `${prefix}${china}`;
+    expect(filterRows([{ type: "user", text: `${prefix}${canada}` }], { q: qHalf })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${prefix}${us}` }], { q: qHalf })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${prefix}${canada}` }], { q: qFull })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${prefix}${us}` }], { q: qFull })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(198)}${canada}` }], { q: `${"x".repeat(198)}${letter}` })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(199)}${canada}` }], { q: `${"x".repeat(199)}${letter}` })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+    expect(filterRows([{ type: "user", text: `${prefix}${canada}` }], { q: prefix }).length).toBe(1);
+  });
+
   it("keeps ZWJ inside a family emoji so the original row matches", () => {
     const family = "\u{1F468}‍\u{1F469}‍\u{1F467}";
     const q = `${"x".repeat(190)}${family}`;
@@ -333,6 +369,45 @@ describe("filterGroups", () => {
     expect(filterGroups(groups, { q: paddedCanada }).some((g) =>
       g.rows.some((r) => r.type === "user" && r.text.includes(china)),
     )).toBe(false);
+    const filtered = filterGroups(groups, { q: china });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(china))).toBe(true);
+  });
+
+  it("filterGroups: a lone regional letter does not keep every flag turn", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const letterC = "\u{1F1E8}";
+    const groups = groupTurns([
+      { type: "user", text: `visit ${canada}` },
+      { type: "user", text: `visit ${china}` },
+      { type: "user", text: `visit ${us}` },
+    ]);
+    expect(filterGroups(groups, { q: letterC })).toEqual([]);
+    expect(filterGroups(groups, { q: "\u{1F1F3}" })).toEqual([]);
+    const filtered = filterGroups(groups, { q: china });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(china))).toBe(true);
+  });
+
+  it("filterGroups: 200x then a half or full flag must not keep another padded flag", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const letter = "\u{1F1E8}";
+    const prefix = "x".repeat(200);
+    const groups = groupTurns([
+      { type: "user", text: `${prefix}${canada}` },
+      { type: "user", text: `${prefix}${us}` },
+      { type: "user", text: `${prefix}${china}` },
+    ]);
+    expect(filterGroups(groups, { q: `${prefix}${letter}` })).toEqual([]);
+    expect(
+      filterGroups(groups, { q: `${prefix}${china}` }).some((g) =>
+        g.rows.some((r) => r.type === "user" && (r.text.includes(canada) || r.text.includes(us))),
+      ),
+    ).toBe(false);
     const filtered = filterGroups(groups, { q: china });
     expect(filtered).toHaveLength(1);
     expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(china))).toBe(true);
