@@ -155,7 +155,7 @@ describe("panel integration: snapshot → labels a Chinese operator would see", 
     expect(snap.pie.form).toBe("empty");
   });
 
-  it("burn rate stays 尚未结算 until a second Result lands", () => {
+  it("burn rate stays 缺数据 until a second Result lands", () => {
     const snap = buildMonitorSnapshot({
       session: { ...session, last_kind: "turn_done", usage_updated_ts: 1_787_403_750 },
       info: {
@@ -175,8 +175,9 @@ describe("panel integration: snapshot → labels a Chinese operator would see", 
     expect(snap.freshness.state).toBe("settled");
     expect(snap.freshness.label).toBe("已结算");
     expect(snap.spark.headline).toBe(46542 + 1490 + 256);
+    expect(snap.spark.path).toBeNull();
     expect(snap.burn.usd_per_min).toBeNull();
-    expect(snap.burn.label).toBe(UNSETTLED_LABEL);
+    expect(snap.burn.label).toBe(INCOMPLETE_LABEL);
   });
 
   it("timeline rows keep clock + tool card fields from classified events", () => {
@@ -223,6 +224,35 @@ describe("panel integration: snapshot → labels a Chinese operator would see", 
     expect(snap.pie.slices).toHaveLength(2);
     expect(snap.pie.label).toBe(INCOMPLETE_LABEL);
     expect(snap.pie.total).toBeCloseTo(0.27, 8);
+  });
+
+  it("usage.updated_ts on an idle session is 已结算; missing history stays 缺数据", () => {
+    const snap = buildMonitorSnapshot({
+      session: { ...session, last_kind: "idle" },
+      info: {
+        cost_usd: 0.270088,
+        input_tokens: 46542,
+        output_tokens: 1490,
+        cache_read_input_tokens: 256,
+        cache_creation_input_tokens: 0,
+        usage: { updated_ts: 1_787_403_750, cost_usd: 0.270088 },
+        model_usage: {
+          "claude-opus-4-6": { cost_usd: 0.18 },
+          "claude-sonnet-4-6": { cost_usd: 0.09 },
+        },
+      },
+    });
+    expect(snap.freshness.state).toBe("settled");
+    expect(snap.freshness.label).toBe("已结算");
+    expect(snap.freshness.updated_ts).toBe(1_787_403_750);
+    expect(snap.spark.headline).toBe(46542 + 1490 + 256);
+    expect(snap.spark.path).toBeNull();
+    expect(snap.spark.label).toBe(INCOMPLETE_LABEL);
+    expect(snap.burn.usd_per_min).toBeNull();
+    expect(snap.burn.label).toBe(INCOMPLETE_LABEL);
+    expect(snap.cache.state).toBe("settled");
+    expect(snap.pie.state).toBe("settled");
+    expect(snap.pie.form).toBe("pie");
   });
 
   it("turn_done with two model costs draws a pie", () => {

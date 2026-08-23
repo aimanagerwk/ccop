@@ -147,6 +147,20 @@ export function usageFreshness(input: {
   return { state: "settled", label: SETTLED_LABEL, updated_ts: ts };
 }
 
+/** Finite clock from usage_updated_ts or usage.updated_ts. Never Date.now / last_turn. */
+export function pickUsageClock(...sources: unknown[]): number | null {
+  for (const src of sources) {
+    if (!isRecord(src)) continue;
+    const top = ownFinite(src, "usage_updated_ts");
+    if (top !== null) return top;
+    if (own(src, "usage") && isRecord(src.usage)) {
+      const nested = ownFinite(src.usage, "updated_ts");
+      if (nested !== null) return nested;
+    }
+  }
+  return null;
+}
+
 export function sparkLayout(
   points: SparkPoint[],
   width = SPARK_W,
@@ -198,12 +212,9 @@ export function tokenSpark(
   if (freshness.state === "unsettled") return empty("unsettled", UNSETTLED_LABEL);
   const points = parseUsageHistory(history).map((p) => ({ ts: p.ts, tokens: pointTokens(p) }));
   if (!points.length) {
-    const headline = freshness.state === "incomplete" ? liveTokenTotal(live) : null;
+    const headline = liveTokenTotal(live);
     if (headline === null) {
-      return empty(
-        freshness.state === "incomplete" ? "incomplete" : "unsettled",
-        freshness.state === "incomplete" ? INCOMPLETE_LABEL : UNSETTLED_LABEL,
-      );
+      return empty("incomplete", INCOMPLETE_LABEL);
     }
     const fallback = [{ ts: 0, tokens: headline }];
     const layout = sparkLayout(fallback, width, height);
@@ -244,10 +255,10 @@ export function sparkClass(state: FreshnessState): string {
 /** Adjacent settled costs only. Never wall-clock extrapolate. */
 export function burnRate(history: unknown, freshness: Freshness): BurnRate {
   const missing = (): BurnRate => {
-    if (freshness.state === "incomplete") {
-      return { state: "incomplete", label: INCOMPLETE_LABEL, usd_per_min: null };
+    if (freshness.state === "unsettled") {
+      return { state: "unsettled", label: UNSETTLED_LABEL, usd_per_min: null };
     }
-    return { state: "unsettled", label: UNSETTLED_LABEL, usd_per_min: null };
+    return { state: "incomplete", label: INCOMPLETE_LABEL, usd_per_min: null };
   };
   const points = parseUsageHistory(history);
   if (points.length < 2) return missing();
@@ -331,11 +342,8 @@ export function cacheHit(history: unknown, freshness: Freshness, live?: LiveUsag
     if (freshness.state === "incomplete") return { state: "incomplete", label: INCOMPLETE_LABEL, ...parts };
     return { state: "settled", label: SETTLED_LABEL, ...parts };
   }
-  if (freshness.state !== "incomplete" || !live || typeof live !== "object") {
-    return empty(
-      freshness.state === "incomplete" ? "incomplete" : "unsettled",
-      freshness.state === "incomplete" ? INCOMPLETE_LABEL : UNSETTLED_LABEL,
-    );
+  if (!live || typeof live !== "object") {
+    return empty("incomplete", INCOMPLETE_LABEL);
   }
   const read = liveFinite(live, "cache_read_input_tokens") ?? 0;
   const input = liveFinite(live, "input_tokens") ?? 0;
@@ -347,7 +355,9 @@ export function cacheHit(history: unknown, freshness: Freshness, live?: LiveUsag
   if (!any) return empty("incomplete", INCOMPLETE_LABEL);
   const parts = cacheFromParts(read, input, creation);
   if (!parts) return empty("incomplete", INCOMPLETE_LABEL);
-  return { state: "incomplete", label: INCOMPLETE_LABEL, ...parts };
+  if (freshness.state === "stale") return { state: "stale", label: STALE_LABEL, ...parts };
+  if (freshness.state === "incomplete") return { state: "incomplete", label: INCOMPLETE_LABEL, ...parts };
+  return { state: "settled", label: SETTLED_LABEL, ...parts };
 }
 
 export function formatCacheHit(ratio: number | null | undefined): string {

@@ -6,6 +6,7 @@ import {
   cacheHit,
   modelCostPie,
   parseUsageHistory,
+  pickUsageClock,
   tokenSpark,
   usageFreshness,
   type BurnRate,
@@ -544,8 +545,7 @@ export function buildMonitorSnapshot(input: MonitorInput): MonitorSnapshot {
         ? session.enable_workflows
         : null;
   const effort = str(info?.effort) || str(session.effort) || null;
-  const usage_updated_ts =
-    info && "usage_updated_ts" in info ? finiteOrNull(info.usage_updated_ts) : finiteOrNull(session.usage_updated_ts);
+  const usage_updated_ts = pickUsageClock(info, session);
   const usage_history = parseUsageHistory(info && "usage_history" in info ? info.usage_history : undefined);
   const models = modelsFrom(modelRaw);
   const has_snapshot =

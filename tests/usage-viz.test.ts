@@ -6,6 +6,7 @@ import {
   formatCacheHit,
   modelCostPie,
   parseUsageHistory,
+  pickUsageClock,
   sparkLayout,
   tokenSpark,
   usageFreshness,
@@ -83,6 +84,16 @@ describe("usageFreshness", () => {
   });
 });
 
+describe("pickUsageClock", () => {
+  it("reads usage.updated_ts when the flattened field is missing", () => {
+    expect(pickUsageClock({ usage: { updated_ts: 42 } })).toBe(42);
+    expect(pickUsageClock({ usage_updated_ts: 10 }, { usage: { updated_ts: 42 } })).toBe(10);
+    expect(pickUsageClock({ usage_updated_ts: null, usage: { updated_ts: 42 } })).toBe(42);
+    expect(pickUsageClock({ usage: { updated_ts: Number.NaN } })).toBeNull();
+    expect(pickUsageClock(null, undefined, { last_turn: { ts: 99 } })).toBeNull();
+  });
+});
+
 describe("tokenSpark", () => {
   it("does not draw a line for a single settled point", () => {
     const spark = tokenSpark([a], usageFreshness({ usage_updated_ts: 10, last_kind: "turn_done" }));
@@ -152,10 +163,10 @@ describe("burnRate", () => {
   const settled = usageFreshness({ usage_updated_ts: 20, last_kind: "turn_done" });
   const stale = usageFreshness({ usage_updated_ts: 20, last_kind: "working" });
 
-  it("needs two settled points — one point is 尚未结算", () => {
+  it("needs two history points — one point is 缺数据, not a slope", () => {
     const rate = burnRate([a], settled);
-    expect(rate.state).toBe("unsettled");
-    expect(rate.label).toBe(UNSETTLED_LABEL);
+    expect(rate.state).toBe("incomplete");
+    expect(rate.label).toBe(INCOMPLETE_LABEL);
     expect(rate.usd_per_min).toBeNull();
   });
 
@@ -176,7 +187,7 @@ describe("burnRate", () => {
 
   it("does not invent a rate from empty history or a zero Δt", () => {
     expect(burnRate([], settled).usd_per_min).toBeNull();
-    expect(burnRate([], settled).label).toBe(UNSETTLED_LABEL);
+    expect(burnRate([], settled).label).toBe(INCOMPLETE_LABEL);
     const incomplete = usageFreshness({ usage_updated_ts: null, has_snapshot: true });
     expect(burnRate([], incomplete).usd_per_min).toBeNull();
     expect(burnRate([], incomplete).label).toBe(INCOMPLETE_LABEL);
@@ -186,7 +197,7 @@ describe("burnRate", () => {
       { ...b, ts: 10 },
     ];
     expect(burnRate(sameTs, settled).usd_per_min).toBeNull();
-    expect(burnRate(sameTs, settled).label).toBe(UNSETTLED_LABEL);
+    expect(burnRate(sameTs, settled).label).toBe(INCOMPLETE_LABEL);
   });
 
   it("uses only the last two Result points, never a mid-turn cost", () => {
@@ -209,10 +220,10 @@ describe("cacheHit", () => {
   const settled = usageFreshness({ usage_updated_ts: 20, last_kind: "turn_done" });
   const stale = usageFreshness({ usage_updated_ts: 20, last_kind: "working" });
 
-  it("is 尚未结算 with no Result history", () => {
+  it("is 缺数据 with no Result history even when freshness is settled", () => {
     const hit = cacheHit([], settled);
     expect(hit.ratio).toBeNull();
-    expect(hit.label).toBe(UNSETTLED_LABEL);
+    expect(hit.label).toBe(INCOMPLETE_LABEL);
     expect(formatCacheHit(hit.ratio)).toBe("—");
   });
 
@@ -398,6 +409,70 @@ describe("snapshot spark", () => {
     expect(snap.pie.form).toBe("tile");
     expect(snap.pie.state).toBe("incomplete");
     expect(snap.pie.label).toBe(INCOMPLETE_LABEL);
+  });
+
+  it("reads usage.updated_ts: idle is 已结算, working is 过期; no history stays 缺数据", () => {
+    const live = {
+      cost_usd: 0.27,
+      input_tokens: 100,
+      output_tokens: 20,
+      cache_read_input_tokens: 10,
+      cache_creation_input_tokens: 0,
+      usage: { updated_ts: 42, cost_usd: 0.27 },
+      model_usage: { "claude-opus-4-6": { cost_usd: 0.27 } },
+    };
+    const idle = buildMonitorSnapshot({
+      session: {
+        id: "s1",
+        name: "n",
+        title: null,
+        pending: [],
+        last_turn: null,
+        last_task: null,
+        last_kind: "idle",
+        cost_usd: 0.27,
+        input_tokens: 100,
+        output_tokens: 20,
+        cache_read_input_tokens: 10,
+        cache_creation_input_tokens: 0,
+      },
+      info: live,
+    });
+    expect(idle.freshness.state).toBe("settled");
+    expect(idle.freshness.label).toBe(SETTLED_LABEL);
+    expect(idle.freshness.updated_ts).toBe(42);
+    expect(idle.spark.headline).toBe(130);
+    expect(idle.spark.path).toBeNull();
+    expect(idle.spark.label).toBe(INCOMPLETE_LABEL);
+    expect(idle.burn.usd_per_min).toBeNull();
+    expect(idle.burn.label).toBe(INCOMPLETE_LABEL);
+    expect(idle.cache.state).toBe("settled");
+    expect(idle.pie.state).toBe("settled");
+
+    const working = buildMonitorSnapshot({
+      session: {
+        id: "s1",
+        name: "n",
+        title: null,
+        pending: [],
+        last_turn: null,
+        last_task: null,
+        last_kind: "working",
+        cost_usd: 0.27,
+        input_tokens: 100,
+        output_tokens: 20,
+      },
+      info: live,
+    });
+    expect(working.freshness.state).toBe("stale");
+    expect(working.freshness.label).toBe(STALE_LABEL);
+    expect(working.freshness.updated_ts).toBe(42);
+    expect(working.spark.path).toBeNull();
+    expect(working.spark.label).toBe(INCOMPLETE_LABEL);
+    expect(working.burn.usd_per_min).toBeNull();
+    expect(working.burn.label).toBe(INCOMPLETE_LABEL);
+    expect(working.cache.state).toBe("stale");
+    expect(working.pie.state).toBe("stale");
   });
 
   it("does not pull mid-turn task tokens into the spark", () => {

@@ -14,6 +14,7 @@ import {
   isSparkClass,
   modelCostPie,
   parseUsageHistory,
+  pickUsageClock,
   pieSliceClass,
   pieWrapClass,
   sparkClass,
@@ -151,6 +152,18 @@ describe("usage-viz security", () => {
     expect(snap.freshness.label).toBe("尚未结算");
     expect(snap.freshness.label).not.toMatch(/<|>|script/i);
     expect(freshnessClass(snap.freshness.state)).not.toMatch(/<|>|javascript:/i);
+  });
+
+  it("pickUsageClock ignores inherited updated_ts and last_turn clocks", () => {
+    (Object.prototype as { updated_ts?: number }).updated_ts = 999;
+    try {
+      expect(pickUsageClock({ usage: { cost_usd: 0.1 } })).toBeNull();
+      expect(pickUsageClock({ last_turn: { ts: 88 } })).toBeNull();
+      expect(pickUsageClock({ usage: JSON.parse('{"updated_ts":12,"__proto__":{"hacked":true}}') })).toBe(12);
+      expect(({} as { hacked?: boolean }).hacked).toBeUndefined();
+    } finally {
+      delete (Object.prototype as { updated_ts?: unknown }).updated_ts;
+    }
   });
 
   it("cache hit ignores inherited cache_read and extra keys", () => {
