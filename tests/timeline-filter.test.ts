@@ -57,7 +57,7 @@ describe("filterRows", () => {
     expect(filterRows([row], { q: "PATCH" })).toEqual([row]);
   });
 
-  it("matches tool name and detail only", () => {
+  it("matches tool name, detail, and clipped card input/output", () => {
     const row: FoldedRow = {
       type: "tool",
       name: "Read",
@@ -66,21 +66,21 @@ describe("filterRows", () => {
     };
     expect(filterRows([row], { q: "Read" })).toEqual([row]);
     expect(filterRows([row], { q: "a.ts" })).toEqual([row]);
-    expect(filterRows([row], { q: "hidden" })).toEqual([]);
+    expect(filterRows([row], { q: "hidden" })).toEqual([row]);
   });
 
-  it("does not match tool input", () => {
+  it("matches tool input JSON", () => {
     const row: FoldedRow = {
       type: "tool",
       name: "Bash",
       detail: "echo hi",
       input: { command: "cat /etc/shadow", secret: "needle-in-input" },
     };
-    expect(filterRows([row], { q: "needle-in-input" })).toEqual([]);
-    expect(filterRows([row], { q: "shadow" })).toEqual([]);
+    expect(filterRows([row], { q: "needle-in-input" })).toEqual([row]);
+    expect(filterRows([row], { q: "shadow" })).toEqual([row]);
   });
 
-  it("does not match tool output or base64", () => {
+  it("matches clipped tool output but not omitted long data/source", () => {
     const row: FoldedRow = {
       type: "tool",
       name: "Read",
@@ -88,9 +88,16 @@ describe("filterRows", () => {
       input: {},
       output: { content: "AAAA", data: "YmFzZTY0c2VjcmV0", source: "blob" },
     };
-    expect(filterRows([row], { q: "AAAA" })).toEqual([]);
-    expect(filterRows([row], { q: "YmFzZTY0c2VjcmV0" })).toEqual([]);
-    expect(filterRows([row], { q: "blob" })).toEqual([]);
+    expect(filterRows([row], { q: "AAAA" })).toEqual([row]);
+    const longB64 = "B".repeat(300);
+    const omitted: FoldedRow = {
+      type: "tool",
+      name: "Read",
+      detail: "img.png",
+      input: {},
+      output: { data: longB64, source: longB64 },
+    };
+    expect(filterRows([omitted], { q: longB64.slice(0, 40) })).toEqual([]);
   });
 
   it("matches system items", () => {

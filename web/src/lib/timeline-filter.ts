@@ -1,11 +1,11 @@
 /** Filter folded transcript rows / turn groups. Does not mutate input. */
 
-import type { FoldedRow } from "./fold-transcript";
+import { toolCardPresentation, TOOL_OUTPUT_CLIP, type FoldedRow } from "./fold-transcript";
 import type { TurnGroup } from "./timeline-turn";
 import { localDayKey } from "./format-ts";
 
 export const QUERY_MAX_LEN = 200;
-export const TEXT_CLIP = 4096;
+export const TEXT_CLIP = TOOL_OUTPUT_CLIP;
 export const ITEM_CLIP = 256;
 
 export type FilterQuery = {
@@ -81,8 +81,8 @@ function rebuildGroup(turnId: number, rows: FoldedRow[]): TurnGroup {
   for (const row of rows) {
     const ts = finiteTs(row);
     if (ts === undefined) continue;
-    if (startTs === undefined) startTs = ts;
-    endTs = ts;
+    if (startTs === undefined || ts < startTs) startTs = ts;
+    if (endTs === undefined || ts > endTs) endTs = ts;
   }
   if (startTs !== undefined) group.startTs = startTs;
   if (endTs !== undefined) group.endTs = endTs;
@@ -101,7 +101,7 @@ export function sanitizeQuery(raw: FilterQuery | unknown): SanitizedQuery {
   if (own(raw, "q")) {
     const q = (raw as { q?: unknown }).q;
     if (typeof q === "string") {
-      needle = q.slice(0, QUERY_MAX_LEN).trim();
+      needle = q.trim().slice(0, QUERY_MAX_LEN);
     }
   }
   let types: Set<FoldedRow["type"]> | null = null;
@@ -149,6 +149,18 @@ export function rowVisibleText(row: FoldedRow): string[] {
     const detail = ownString(row, "detail");
     if (name !== undefined) out.push(name);
     if (detail !== undefined) out.push(detail);
+    let input: Record<string, unknown> = {};
+    if (own(row, "input")) {
+      const raw = (row as { input?: unknown }).input;
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+        input = raw as Record<string, unknown>;
+      }
+    }
+    let output: unknown;
+    if (own(row, "output")) output = (row as { output?: unknown }).output;
+    const presented = toolCardPresentation(input, output);
+    if (presented.inputText) out.push(presented.inputText);
+    if (presented.outputText) out.push(presented.outputText);
     return out;
   }
   if (type === "system") {

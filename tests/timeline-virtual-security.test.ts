@@ -111,6 +111,10 @@ describe("timeline-virtual security", () => {
       expect(w.end).toBeGreaterThanOrEqual(w.start);
       expect(w.end).toBeLessThanOrEqual(s.count);
       expect(w.end - w.start).toBeLessThanOrEqual(MAX_WINDOW);
+      if (s.count > 0) {
+        expect(w.start).toBeLessThan(w.end);
+        expect(w.start).toBeLessThan(s.count);
+      }
     }
   });
 

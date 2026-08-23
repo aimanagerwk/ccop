@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useMemo, useState, type ReactNode, type UIEvent } from "react";
 import type { ClassifiedEvent } from "../lib/protocol";
-import { foldTranscript, toolCardPresentation, type FoldedRow } from "../lib/fold-transcript";
+import { clipToolText, foldTranscript, toolCardPresentation, type FoldedRow } from "../lib/fold-transcript";
 import { flattenTimeline, groupTurns, type TimelineItem } from "../lib/timeline-turn";
 import { filterGroups } from "../lib/timeline-filter";
 import { DEFAULT_ROW_HEIGHT, virtualWindow, visibleSlice } from "../lib/timeline-virtual";
@@ -64,7 +64,7 @@ function Item(props: { row: FoldedRow }) {
     body = (
       <details className="think-card">
         <summary>思考</summary>
-        <pre className="think-body">{row.text}</pre>
+        <pre className="think-body">{clipToolText(row.text)}</pre>
       </details>
     );
   } else if (row.type === "user") {
@@ -72,7 +72,7 @@ function Item(props: { row: FoldedRow }) {
     body = (
       <div className="bubble user">
         <div className="who">你</div>
-        <div className="body">{row.text}</div>
+        <div className="body">{clipToolText(row.text)}</div>
       </div>
     );
   } else if (row.type === "assistant") {
@@ -81,7 +81,7 @@ function Item(props: { row: FoldedRow }) {
       <div className="bubble assistant">
         <div className="who">助手</div>
         <div className="body">
-          <MdBody text={row.text} />
+          <MdBody text={clipToolText(row.text)} />
         </div>
       </div>
     );
@@ -101,7 +101,7 @@ function Item(props: { row: FoldedRow }) {
     body = (
       <div className="flag alert">
         <span className="k">待决定</span>
-        <span>{row.text}</span>
+        <span>{clipToolText(row.text)}</span>
       </div>
     );
   } else if (row.type === "needs_info") {
@@ -109,7 +109,7 @@ function Item(props: { row: FoldedRow }) {
     body = (
       <div className="flag alert">
         <span className="k">需补充</span>
-        <span>{row.text}</span>
+        <span>{clipToolText(row.text)}</span>
       </div>
     );
   } else if (row.type === "failed") {
@@ -117,7 +117,7 @@ function Item(props: { row: FoldedRow }) {
     body = (
       <div className="flag alert">
         <span className="k">失败</span>
-        <span>{row.text}</span>
+        <span>{clipToolText(row.text)}</span>
       </div>
     );
   } else if (row.type === "dead") {
@@ -125,7 +125,7 @@ function Item(props: { row: FoldedRow }) {
     body = (
       <div className="flag alert">
         <span className="k">已结束</span>
-        <span>{row.text}</span>
+        <span>{clipToolText(row.text)}</span>
       </div>
     );
   } else if (row.type === "task_done") {
@@ -133,7 +133,7 @@ function Item(props: { row: FoldedRow }) {
     body = (
       <div className="flag ok">
         <span className="k">任务完成</span>
-        <span>{row.text}</span>
+        <span>{clipToolText(row.text)}</span>
       </div>
     );
   } else {

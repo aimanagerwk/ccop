@@ -67,8 +67,11 @@ describe("timeline-filter security", () => {
     expect(filterRows([row], { q: unique })).toEqual([row]);
   });
 
-  it("3MB tool output is not scanned and does not appear in rowVisibleText", () => {
-    const blob = "A".repeat(3 * 1024 * 1024);
+  it("3MB tool output is clipped to ~64k and not pushed raw", () => {
+    const unique = "UNIQUE_PAST_64K";
+    const prefix = "A".repeat(64_000);
+    const rest = 3 * 1024 * 1024 - prefix.length - unique.length;
+    const blob = `${prefix}${unique}${"A".repeat(rest)}`;
     const row: FoldedRow = {
       type: "tool",
       name: "Read",
@@ -77,25 +80,42 @@ describe("timeline-filter security", () => {
       output: blob,
     };
     const texts = rowVisibleText(row);
-    expect(texts).toEqual(["Read", "huge.bin"]);
-    expect(texts.join("")).not.toContain("AAA");
-    expect(filterRows([row], { q: "AAA" })).toEqual([]);
+    const joined = texts.join("");
+    expect(joined.length).toBeLessThan(100_000);
+    expect(joined.length).toBeGreaterThan(50_000);
+    expect(joined).toContain("AAA");
+    expect(joined).not.toContain(unique);
+    expect(texts.some((t) => t.length > 2 * 1024 * 1024)).toBe(false);
+    expect(filterRows([row], { q: "AAA" })).toEqual([row]);
+    expect(filterRows([row], { q: unique })).toEqual([]);
     expect(filterRows([row], { q: "huge.bin" })).toEqual([row]);
   });
 
   it("base64 data field is not visible text", () => {
     const b64 = "YmFzZTY0c2VjcmV0";
+    const longB64 = "B".repeat(300);
+    const shortShown = "short-shown-token";
     const user = Object.assign({ type: "user" as const, text: "hi" }, { data: b64, source: b64 });
     const tool: FoldedRow = {
       type: "tool",
       name: "Read",
       detail: "x",
-      input: { data: b64, source: b64 },
-      output: { data: b64, base64: b64 },
+      input: { data: longB64, source: longB64 },
+      output: { data: longB64 },
+    };
+    const shown: FoldedRow = {
+      type: "tool",
+      name: "Read",
+      detail: "x",
+      input: { note: shortShown },
+      output: { content: "AAAA" },
     };
     expect(rowVisibleText(user as FoldedRow).join("")).not.toContain(b64);
-    expect(rowVisibleText(tool).join("")).not.toContain(b64);
+    expect(rowVisibleText(tool).join("")).not.toContain(longB64);
     expect(filterRows([user as FoldedRow, tool], { q: b64 })).toEqual([]);
+    expect(filterRows([user as FoldedRow, tool], { q: longB64.slice(0, 40) })).toEqual([]);
+    expect(filterRows([shown], { q: shortShown })).toEqual([shown]);
+    expect(filterRows([shown], { q: "AAAA" })).toEqual([shown]);
   });
 
   it("inherited proto keys on row are not searched", () => {

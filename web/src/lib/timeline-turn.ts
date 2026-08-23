@@ -40,8 +40,8 @@ function makeGroup(turnId: number, rows: FoldedRow[]): TurnGroup {
   for (const row of rows) {
     const ts = finiteTs(row);
     if (ts === undefined) continue;
-    if (startTs === undefined) startTs = ts;
-    endTs = ts;
+    if (startTs === undefined || ts < startTs) startTs = ts;
+    if (endTs === undefined || ts > endTs) endTs = ts;
   }
   if (startTs !== undefined) group.startTs = startTs;
   if (endTs !== undefined) group.endTs = endTs;
@@ -83,24 +83,12 @@ function ownFiniteTs(group: object): number | undefined {
   return typeof ts === "number" && Number.isFinite(ts) ? ts : undefined;
 }
 
-function ownDayKey(group: object): string | undefined {
-  if (!own(group, "dayKey")) return undefined;
-  const k = (group as { dayKey?: unknown }).dayKey;
-  return typeof k === "string" && k ? k : undefined;
-}
-
 export function flattenTimeline(groups: readonly TurnGroup[]): TimelineItem[] {
   const items: TimelineItem[] = [];
   let lastDay: string | undefined;
 
   for (const group of groups) {
-    const dayKey = ownDayKey(group);
     const startTs = ownFiniteTs(group);
-    if (dayKey !== undefined && dayKey !== lastDay) {
-      const label = (startTs !== undefined ? formatDayLabel(startTs) : undefined) || dayKey;
-      items.push({ kind: "day", dayKey, label });
-      lastDay = dayKey;
-    }
     const head: Extract<TimelineItem, { kind: "turn-head" }> = {
       kind: "turn-head",
       turnId: group.turnId,
@@ -109,6 +97,13 @@ export function flattenTimeline(groups: readonly TurnGroup[]): TimelineItem[] {
     if (startTs !== undefined) head.startTs = startTs;
     items.push(head);
     for (const row of group.rows) {
+      const ts = finiteTs(row);
+      const dayKey = ts !== undefined ? localDayKey(ts) : undefined;
+      if (dayKey !== undefined && dayKey !== lastDay) {
+        const label = formatDayLabel(ts) || dayKey;
+        items.push({ kind: "day", dayKey, label });
+        lastDay = dayKey;
+      }
       items.push({ kind: "row", row, turnId: group.turnId });
     }
   }

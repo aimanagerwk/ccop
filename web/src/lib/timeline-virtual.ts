@@ -77,6 +77,12 @@ export function sanitizeVirtualParams(p: VirtualParams): Required<VirtualParams>
     overscan = Math.min(MAX_OVERSCAN, Math.floor(rawO));
   }
 
+  const contentHeight = count * rowHeight;
+  const maxScroll = Number.isFinite(contentHeight)
+    ? Math.max(0, contentHeight - viewportHeight)
+    : 0;
+  scrollTop = Math.min(scrollTop, maxScroll);
+
   return { scrollTop, viewportHeight, rowHeight, count, overscan };
 }
 
@@ -87,10 +93,10 @@ export function virtualWindow(p: VirtualParams): VirtualWindow {
   }
 
   let start = Math.floor(s.scrollTop / s.rowHeight) - s.overscan;
-  start = clampIndex(start, 0, s.count);
+  start = clampIndex(start, 0, s.count - 1);
 
   let end = Math.ceil((s.scrollTop + s.viewportHeight) / s.rowHeight) + s.overscan;
-  end = clampIndex(end, start, s.count);
+  end = clampIndex(end, start + 1, s.count);
   if (end - start > MAX_WINDOW) end = start + MAX_WINDOW;
 
   const offsetTop = finiteOrZero(start * s.rowHeight);
