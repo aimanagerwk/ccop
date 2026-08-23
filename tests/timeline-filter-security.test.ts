@@ -310,6 +310,20 @@ describe("timeline-filter security", () => {
     expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
   });
 
+  it("clipped leftover second-half flag cannot match padded Canada or US via the prefix", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const secondHalf = china.slice(1, 2);
+    const src = readFileSync(new URL("../web/src/lib/timeline-filter.ts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/new RegExp/);
+    expect(src).not.toMatch(/RegExp\s*\(/);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(200)}${canada}` }], { q: `${"x".repeat(200)}${secondHalf}` })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(200)}${us}` }], { q: `${"x".repeat(200)}${secondHalf}` })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(200)}${canada}` }], { q: `${"x".repeat(201)}${secondHalf}` })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
   it("200x then a half or full flag cannot match another padded flag via a dropped tail", () => {
     const china = "\u{1F1E8}\u{1F1F3}";
     const canada = "\u{1F1E8}\u{1F1E6}";

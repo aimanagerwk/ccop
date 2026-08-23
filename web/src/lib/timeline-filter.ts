@@ -176,6 +176,7 @@ function leadingRegionalSequence(s: string): string {
     const next = s.length > 1 ? s.charCodeAt(1) : 0;
     if (!isLowSurrogate(next)) return s.slice(0, 1);
   }
+  if (s.length > 0 && isLowSurrogate(s.charCodeAt(0))) return s.slice(0, 1);
   let i = 0;
   while (i < s.length) {
     const cp = codePointAt(s, i);
@@ -198,6 +199,7 @@ function firstRegionalInTail(s: string): string {
       const next = i + 1 < s.length ? s.charCodeAt(i + 1) : 0;
       if (!isLowSurrogate(next)) return s.slice(i, i + 1);
     }
+    if (isLowSurrogate(c)) return s.slice(i, i + 1);
     const cp = codePointAt(s, i);
     if (cp === undefined) break;
     if (isRegionalIndicator(cp)) return leadingRegionalSequence(s.slice(i));

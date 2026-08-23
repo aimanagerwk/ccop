@@ -176,6 +176,22 @@ describe("holes / unit", () => {
     expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
   });
 
+  it("clipped leftover second-half flag cannot match padded Canada or US via the prefix", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const secondHalf = china.slice(1, 2);
+    const q200 = `${"x".repeat(200)}${secondHalf}`;
+    const q201 = `${"x".repeat(201)}${secondHalf}`;
+    expect(filterRows([{ type: "user", text: `${"x".repeat(200)}${canada}` }], { q: q200 })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(200)}${us}` }], { q: q200 })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(200)}${china}` }], { q: q200 })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(200)}${canada}` }], { q: q201 })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(200)}${us}` }], { q: q201 })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(200)}${canada}` }], { q: "x".repeat(200) }).length).toBe(1);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
   it("200 x's then a half flag cannot match another padded flag via the leftover prefix", () => {
     const china = "\u{1F1E8}\u{1F1F3}";
     const canada = "\u{1F1E8}\u{1F1E6}";
@@ -1187,6 +1203,21 @@ describe("holes / integration", () => {
     expect(filterGroups(groups, { q: qHalf })).toEqual([]);
     // fromSent clips summaries at 200 units, so the folded rows no longer
     // contain the flag. Complete 🇨🇳 must still match a row that kept it.
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
+  it("filterGroups: clipped leftover second-half flag must not keep padded Canada or US turns", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const secondHalf = china.slice(1, 2);
+    const groups = groupTurns([
+      { type: "user", text: `${"x".repeat(200)}${canada}` },
+      { type: "user", text: `${"x".repeat(200)}${us}` },
+      { type: "user", text: `${"x".repeat(200)}${china}` },
+    ]);
+    expect(filterGroups(groups, { q: `${"x".repeat(200)}${secondHalf}` })).toEqual([]);
+    expect(filterGroups(groups, { q: `${"x".repeat(201)}${secondHalf}` })).toEqual([]);
     expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
   });
 
