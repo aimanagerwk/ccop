@@ -22,6 +22,18 @@ export type UsageTotals = {
   cache_creation_input_tokens: number;
 };
 
+/** One ResultMessage snapshot. Never interpolated, never summed across results. */
+export type UsageHistoryPoint = {
+  ts: number;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+};
+
+export const USAGE_HISTORY_CAP = 16;
+
 const SKIP_MODEL_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 const TURN_USAGE_KEYS = [
@@ -144,10 +156,12 @@ export function usageStatusFields(usage: SessionUsage | null | undefined): Recor
       cache_read_input_tokens: null,
       cache_creation_input_tokens: null,
       model_usage: null,
+      usage_updated_ts: null,
     };
   }
   const model_usage = normalizeModelUsage(usage.model_usage);
   const t = sumModelUsageTokens(model_usage);
+  const ts = typeof usage.updated_ts === "number" && Number.isFinite(usage.updated_ts) ? usage.updated_ts : null;
   return {
     cost_usd: num(usage.cost_usd),
     input_tokens: t.input_tokens,
@@ -155,5 +169,73 @@ export function usageStatusFields(usage: SessionUsage | null | undefined): Recor
     cache_read_input_tokens: t.cache_read_input_tokens,
     cache_creation_input_tokens: t.cache_creation_input_tokens,
     model_usage,
+    usage_updated_ts: ts,
+  };
+}
+
+export function settledTokenTotal(t: Pick<UsageTotals, (typeof TURN_USAGE_KEYS)[number]>): number {
+  return t.input_tokens + t.output_tokens + t.cache_read_input_tokens + t.cache_creation_input_tokens;
+}
+
+export function usageHistoryPoint(usage: SessionUsage): UsageHistoryPoint | null {
+  const ts = typeof usage.updated_ts === "number" && Number.isFinite(usage.updated_ts) ? usage.updated_ts : null;
+  if (ts === null) return null;
+  const t = sumModelUsageTokens(usage.model_usage);
+  return {
+    ts,
+    cost_usd: num(usage.cost_usd),
+    input_tokens: t.input_tokens,
+    output_tokens: t.output_tokens,
+    cache_read_input_tokens: t.cache_read_input_tokens,
+    cache_creation_input_tokens: t.cache_creation_input_tokens,
+  };
+}
+
+export function normalizeUsageHistory(raw: unknown): UsageHistoryPoint[] {
+  if (!Array.isArray(raw)) return [];
+  const out: UsageHistoryPoint[] = [];
+  for (const item of raw) {
+    if (!isRecord(item)) continue;
+    if (!own(item, "ts")) continue;
+    const ts = item.ts;
+    if (typeof ts !== "number" || !Number.isFinite(ts)) continue;
+    const rec = Object.assign(Object.create(null), {
+      ts,
+      cost_usd: ownNum(item, "cost_usd"),
+      input_tokens: ownNum(item, "input_tokens"),
+      output_tokens: ownNum(item, "output_tokens"),
+      cache_read_input_tokens: ownNum(item, "cache_read_input_tokens"),
+      cache_creation_input_tokens: ownNum(item, "cache_creation_input_tokens"),
+    }) as UsageHistoryPoint;
+    out.push(rec);
+  }
+  return out.slice(-USAGE_HISTORY_CAP);
+}
+
+/** Append one settled Result snapshot. Latest result still replaces Session.usage; history keeps each point. */
+export function appendUsageHistory(prev: unknown, usage: SessionUsage): UsageHistoryPoint[] {
+  const hist = normalizeUsageHistory(prev);
+  const point = usageHistoryPoint(usage);
+  if (!point) return hist;
+  hist.push(point);
+  return hist.slice(-USAGE_HISTORY_CAP);
+}
+
+export function usageHistoryFields(raw: unknown): { usage_history: UsageHistoryPoint[] } {
+  return { usage_history: normalizeUsageHistory(raw) };
+}
+
+/** Disk / resume: keep only SessionUsage fields. Never assign a raw object. */
+export function normalizeSessionUsage(raw: unknown): SessionUsage | null {
+  if (!isRecord(raw)) return null;
+  const tsRaw = ownVal(raw, "updated_ts");
+  const ts = typeof tsRaw === "number" && Number.isFinite(tsRaw) ? tsRaw : null;
+  const costOwn = own(raw, "cost_usd") || own(raw, "model_usage") || own(raw, "last_turn_usage") || ts !== null;
+  if (!costOwn) return null;
+  return {
+    cost_usd: ownNum(raw, "cost_usd"),
+    model_usage: normalizeModelUsage(ownVal(raw, "model_usage")),
+    last_turn_usage: own(raw, "last_turn_usage") ? normalizeTurnUsage(raw.last_turn_usage) : null,
+    updated_ts: ts ?? 0,
   };
 }

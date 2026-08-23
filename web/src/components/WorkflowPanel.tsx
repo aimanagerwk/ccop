@@ -15,6 +15,14 @@ import {
   tokenBarShares,
   type PctSeg,
 } from "../lib/workflow-monitor";
+import {
+  cacheMeterClass,
+  formatBurnRate,
+  formatCacheHit,
+  freshnessClass,
+  pieWrapClass,
+  sparkClass,
+} from "../lib/usage-viz";
 
 function ShareBar(props: { segs: PctSeg[]; tone: "status" | "token"; live?: boolean }) {
   if (!props.segs.length) return <div className="share-bar empty" />;
@@ -76,9 +84,17 @@ export function WorkflowPanel(props: {
           {snap.enable_workflows === true ? <span className="pill">工作流开</span> : null}
           {snap.effort ? <span className="pill">{snap.effort}</span> : null}
           {snap.pending ? <span className="pill warn">待批准 {snap.pending}</span> : null}
+          <span className={freshnessClass(snap.freshness.state)} title="usage 新鲜度">
+            <i className="fresh-ico" aria-hidden />
+            {snap.freshness.label}
+          </span>
         </div>
-        <div className="mon-cost" title="cost_usd">
-          {formatUsd(snap.tokens.cost_usd)}
+        <div className="mon-cost">
+          <div title="cost_usd">{formatUsd(snap.tokens.cost_usd)}</div>
+          <div className={`burn${snap.burn.state === "stale" ? " stale" : ""}`} title="已结算 Δcost / Δt">
+            {snap.burn.usd_per_min == null ? snap.burn.label : formatBurnRate(snap.burn.usd_per_min)}
+            {snap.burn.state === "stale" && snap.burn.usd_per_min != null ? ` · ${snap.burn.label}` : ""}
+          </div>
         </div>
       </header>
 
@@ -115,11 +131,55 @@ export function WorkflowPanel(props: {
             ))}
             {!tokens.length ? <span className="leg mute">还没有用量</span> : null}
           </div>
+          <div className="stat-k" style={{ marginTop: 8 }}>缓存命中</div>
+          <div className="stat-v" title="cache_read / (input + cache_read + cache_creation)">
+            {snap.cache.ratio == null ? snap.cache.label : formatCacheHit(snap.cache.ratio)}
+          </div>
+          <div
+            className={cacheMeterClass(snap.cache.state)}
+            role="img"
+            aria-label={
+              snap.cache.ratio == null
+                ? snap.cache.label
+                : `缓存命中 ${formatCacheHit(snap.cache.ratio)}`
+            }
+          >
+            {snap.cache.ratio != null ? (
+              <span className="cache-fill" style={{ width: `${Math.max(0, Math.min(100, snap.cache.ratio * 100))}%` }} />
+            ) : null}
+          </div>
+          {snap.cache.state === "stale" && snap.cache.ratio != null ? (
+            <div className="leg mute">{snap.cache.label}</div>
+          ) : null}
         </div>
 
         <div className="stat">
-          <div className="stat-k">Token</div>
-          <div className="stat-v">{formatTokens((snap.tokens.input_tokens || 0) + (snap.tokens.output_tokens || 0) || null)}</div>
+          <div className="stat-k">已结算 token</div>
+          <div className="stat-v">
+            {snap.spark.headline == null ? snap.spark.label : formatTokens(snap.spark.headline)}
+          </div>
+          {snap.spark.last ? (
+            <svg
+              className={sparkClass(snap.spark.state)}
+              viewBox={`0 0 ${snap.spark.width} ${snap.spark.height}`}
+              width={snap.spark.width}
+              height={snap.spark.height}
+              role="img"
+              aria-label={
+                snap.spark.points.length < 2
+                  ? `已结算 token ${formatTokens(snap.spark.headline)}`
+                  : `已结算 token 火花，${snap.spark.points.length} 个结算点`
+              }
+            >
+              {snap.spark.path ? (
+                <path d={snap.spark.path} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              ) : null}
+              <circle cx={snap.spark.last.x} cy={snap.spark.last.y} r="4" fill="currentColor" />
+            </svg>
+          ) : (
+            <div className={sparkClass("unsettled")} />
+          )}
+          {snap.spark.state === "stale" ? <div className="leg mute">{snap.spark.label}</div> : null}
           <dl className="kv">
             <div>
               <dt>输入</dt>
@@ -141,16 +201,41 @@ export function WorkflowPanel(props: {
         </div>
       </div>
 
-      {snap.models.length ? (
-        <div className="mon-models">
-          {snap.models.map((m) => (
-            <span key={m.model} className="pill" title={`in ${m.input} / out ${m.output}`}>
-              {clipDisplay(m.model, 28)} · {formatTokens(m.input + m.output)}
-              {m.cost_usd != null ? ` · ${formatUsd(m.cost_usd)}` : ""}
-            </span>
-          ))}
+      {snap.pie.form === "empty" ? null : (
+        <div className={pieWrapClass(snap.pie.state)} aria-label="各模型费用">
+          {snap.pie.form === "tile" ? (
+            <div className="pie-tile">
+              <span className="pie-tile-name">{clipDisplay(snap.pie.slices[0].label, 28)}</span>
+              <span className="pie-tile-cost">{formatUsd(snap.pie.slices[0].cost_usd)}</span>
+            </div>
+          ) : (
+            <>
+              <svg
+                className="pie-svg"
+                viewBox={`0 0 ${snap.pie.width} ${snap.pie.height}`}
+                width={snap.pie.width}
+                height={snap.pie.height}
+                role="img"
+                aria-label={`各模型费用 ${formatUsd(snap.pie.total)}`}
+              >
+                {snap.pie.paths.map((p) => (
+                  <path key={p.key} d={p.d} className={p.className} />
+                ))}
+              </svg>
+              <ul className="pie-legend">
+                {snap.pie.slices.map((s) => (
+                  <li key={s.key}>
+                    <i className={`pie-swatch ${s.slot === "other" ? "other" : `s${s.slot}`}`} aria-hidden />
+                    <span className="pie-name">{clipDisplay(s.label, 28)}</span>
+                    <span className="pie-cost">{formatUsd(s.cost_usd)}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {snap.pie.state === "stale" ? <div className="leg mute">{snap.pie.label}</div> : null}
         </div>
-      ) : null}
+      )}
 
       <div className="mon-lists">
         <div>

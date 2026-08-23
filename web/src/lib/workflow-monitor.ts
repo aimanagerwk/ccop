@@ -1,6 +1,20 @@
 /** Pure snapshot of status / info / tasks / workflows / subagents + task_* events. */
 
 import type { ClassifiedEvent, SessionRow } from "./protocol";
+import {
+  burnRate,
+  cacheHit,
+  modelCostPie,
+  parseUsageHistory,
+  tokenSpark,
+  usageFreshness,
+  type BurnRate,
+  type CacheHit,
+  type Freshness,
+  type HistoryPoint,
+  type ModelCostPie,
+  type TokenSpark,
+} from "./usage-viz";
 
 export type TaskUsage = {
   total_tokens?: number;
@@ -98,6 +112,13 @@ export type MonitorSnapshot = {
   models: MonitorModel[];
   advertise: MonitorAdvertise;
   pending: number;
+  usage_updated_ts: number | null;
+  usage_history: HistoryPoint[];
+  freshness: Freshness;
+  spark: TokenSpark;
+  burn: BurnRate;
+  cache: CacheHit;
+  pie: ModelCostPie;
 };
 
 export type MonitorInput = {
@@ -523,6 +544,18 @@ export function buildMonitorSnapshot(input: MonitorInput): MonitorSnapshot {
         ? session.enable_workflows
         : null;
   const effort = str(info?.effort) || str(session.effort) || null;
+  const usage_updated_ts =
+    info && "usage_updated_ts" in info ? finiteOrNull(info.usage_updated_ts) : finiteOrNull(session.usage_updated_ts);
+  const usage_history = parseUsageHistory(info && "usage_history" in info ? info.usage_history : undefined);
+  const freshness = usageFreshness({
+    usage_updated_ts,
+    last_kind: str(session.last_kind) || str(session.state) || "",
+  });
+  const spark = tokenSpark(usage_history, freshness);
+  const burn = burnRate(usage_history, freshness);
+  const cache = cacheHit(usage_history, freshness);
+  const models = modelsFrom(modelRaw);
+  const pie = modelCostPie(models, freshness);
 
   return {
     session_id: session.id,
@@ -535,7 +568,7 @@ export function buildMonitorSnapshot(input: MonitorInput): MonitorSnapshot {
     tokens,
     tasks,
     agents: agentList,
-    models: modelsFrom(modelRaw),
+    models,
     advertise: {
       skills,
       slash_commands: slash,
@@ -543,5 +576,12 @@ export function buildMonitorSnapshot(input: MonitorInput): MonitorSnapshot {
       ...(str(workflows?.note) ? { note: str(workflows?.note) } : {}),
     },
     pending: session.pending?.length ?? 0,
+    usage_updated_ts,
+    usage_history,
+    freshness,
+    spark,
+    burn,
+    cache,
+    pie,
   };
 }

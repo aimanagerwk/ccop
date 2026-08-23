@@ -1,5 +1,14 @@
 import { describe, expect, it, afterEach } from "vitest";
-import { extractUsageFromResult, sumModelUsageTokens, usageStatusFields } from "../src/usage.js";
+import {
+  appendUsageHistory,
+  extractUsageFromResult,
+  normalizeSessionUsage,
+  normalizeUsageHistory,
+  sumModelUsageTokens,
+  usageHistoryPoint,
+  usageStatusFields,
+  USAGE_HISTORY_CAP,
+} from "../src/usage.js";
 
 afterEach(() => {
   delete (Object.prototype as { inputTokens?: unknown }).inputTokens;
@@ -332,6 +341,7 @@ describe("usageStatusFields", () => {
       cache_read_input_tokens: null,
       cache_creation_input_tokens: null,
       model_usage: null,
+      usage_updated_ts: null,
     });
     expect(usageStatusFields(undefined).model_usage).toBeNull();
   });
@@ -351,6 +361,7 @@ describe("usageStatusFields", () => {
       "input_tokens",
       "model_usage",
       "output_tokens",
+      "usage_updated_ts",
     ];
     expect(Object.keys(usageStatusFields(null)).sort()).toEqual(expected);
     const dirty = {
@@ -443,5 +454,70 @@ describe("usageStatusFields", () => {
     expect(fields.input_tokens).toBe(400);
     expect(fields.cost_usd).not.toBe(0.52);
     expect(fields.input_tokens).not.toBe(550);
+  });
+
+  it("exposes usage_updated_ts from a settled snapshot and nulls a missing one", () => {
+    const u = extractUsageFromResult(resultA)!;
+    expect(typeof usageStatusFields(u).usage_updated_ts).toBe("number");
+    expect(usageStatusFields({ ...u, updated_ts: Number.NaN }).usage_updated_ts).toBeNull();
+  });
+});
+
+describe("usage history", () => {
+  it("appends each Result snapshot without summing tokens or cost", () => {
+    const a = extractUsageFromResult(resultA)!;
+    a.updated_ts = 10;
+    const b = extractUsageFromResult(resultB)!;
+    b.updated_ts = 20;
+    const hist = appendUsageHistory(appendUsageHistory([], a), b);
+    expect(hist).toHaveLength(2);
+    expect(hist[0].input_tokens).toBe(150);
+    expect(hist[1].input_tokens).toBe(400);
+    expect(hist[1].cost_usd).toBe(0.4);
+    expect(hist[1].cost_usd).not.toBe(0.52);
+    expect(hist[1].input_tokens).not.toBe(550);
+  });
+
+  it("does not invent a history point from assistant / thinking / task_progress", () => {
+    expect(extractUsageFromResult({ type: "assistant", message: { usage: { input_tokens: 9 } } })).toBeNull();
+    expect(normalizeUsageHistory([{ ts: Number.NaN, input_tokens: 9 }])).toEqual([]);
+    expect(normalizeUsageHistory("nope")).toEqual([]);
+    expect(usageHistoryPoint({ cost_usd: 1, model_usage: {}, last_turn_usage: null, updated_ts: Number.POSITIVE_INFINITY })).toBeNull();
+  });
+
+  it("caps history and drops prototype / extra keys", () => {
+    const seed = extractUsageFromResult(resultA)!;
+    let hist: ReturnType<typeof appendUsageHistory> = [];
+    for (let i = 0; i < USAGE_HISTORY_CAP + 4; i++) {
+      hist = appendUsageHistory(hist, { ...seed, updated_ts: i + 1 });
+    }
+    expect(hist).toHaveLength(USAGE_HISTORY_CAP);
+    expect(hist[0].ts).toBe(5);
+    const dirty = JSON.parse(
+      '{"ts":1,"cost_usd":0.1,"input_tokens":2,"output_tokens":3,"cache_read_input_tokens":4,"cache_creation_input_tokens":5,"eval":"no","__proto__":{"hacked":true}}',
+    );
+    const clean = normalizeUsageHistory([dirty]);
+    expect(Object.keys(clean[0]).sort()).toEqual([
+      "cache_creation_input_tokens",
+      "cache_read_input_tokens",
+      "cost_usd",
+      "input_tokens",
+      "output_tokens",
+      "ts",
+    ]);
+    expect(({} as { hacked?: boolean }).hacked).toBeUndefined();
+  });
+
+  it("normalizeSessionUsage drops unexpected keys from a disk snapshot", () => {
+    const dirty = JSON.parse(
+      '{"cost_usd":0.1,"model_usage":{"claude-opus":{"inputTokens":2,"outputTokens":3,"cacheReadInputTokens":0,"cacheCreationInputTokens":0}},"last_turn_usage":{"input_tokens":1},"updated_ts":9,"eval":"no","__proto__":{"hacked":true}}',
+    );
+    const u = normalizeSessionUsage(dirty);
+    expect(u?.cost_usd).toBe(0.1);
+    expect(Object.keys(u || {}).sort()).toEqual(["cost_usd", "last_turn_usage", "model_usage", "updated_ts"]);
+    expect((u as { eval?: string } | null)?.eval).toBeUndefined();
+    expect(({} as { hacked?: boolean }).hacked).toBeUndefined();
+    expect(normalizeSessionUsage(null)).toBeNull();
+    expect(normalizeSessionUsage("x")).toBeNull();
   });
 });

@@ -165,6 +165,42 @@ describe("host receiveLoop usage → info/status", () => {
     expect(info.cost_usd).toBe(0.4);
     expect(info.input_tokens).toBe(400);
     expect(info.cost_usd).not.toBe(0.52);
+    const hist = info.usage_history as Array<Record<string, unknown>>;
+    expect(hist).toHaveLength(2);
+    expect(hist[0].input_tokens).toBe(100);
+    expect(hist[1].input_tokens).toBe(400);
+    expect(hist[1].cost_usd).toBe(0.4);
+    expect(hist.map((p) => p.input_tokens).reduce((a: number, n) => a + Number(n), 0)).not.toBe(hist[1].input_tokens);
+    expect(info.usage_updated_ts).toEqual(expect.any(Number));
+    const status = await host.cmdStatus({});
+    const row = (status.sessions as Array<Record<string, unknown>>).find((s) => s.id === ID);
+    expect(row).not.toHaveProperty("usage_history");
+    expect(row?.usage_updated_ts).toEqual(expect.any(Number));
+  });
+
+  it("does not append history from assistant / task_progress / thinking_tokens", async () => {
+    const { host, sess } = liveSession(ID, [
+      {
+        type: "assistant",
+        message: { usage: { input_tokens: 64038, output_tokens: 2201 } },
+      },
+      {
+        type: "system",
+        subtype: "task_progress",
+        task_id: "t1",
+        usage: { total_tokens: 13828 },
+      },
+      {
+        type: "system",
+        subtype: "thinking_tokens",
+        estimated_tokens: 48,
+      },
+    ]);
+    await sess.receiveLoop();
+    const info = await host.cmdInfo({ id: ID });
+    expect(info.usage_history).toEqual([]);
+    expect(info.usage_updated_ts).toBeNull();
+    expect(info.cost_usd).toBeNull();
   });
 
   it("replays wf-evidence snap 9 vs snap 10: task usage does not fill session cost until result", async () => {
