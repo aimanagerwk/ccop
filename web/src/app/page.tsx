@@ -9,7 +9,9 @@ import { Transcript } from "../components/Transcript";
 import { fetchHealth, postJson, rpc } from "../lib/client";
 import {
   emptyDepot,
+  lastPathSeg,
   loadDepot,
+  sessLabel,
   pinCwd,
   saveDepot,
   serverKey,
@@ -168,6 +170,10 @@ export default function Page() {
   const current =
     (sel.serverId && (sessionsByServer[sel.serverId] || []).find((s) => s.id === sel.sessionId)) || null;
   const connected = Boolean(sel.serverId && live[sel.serverId]);
+  const crumbServer = depot.servers.find((s) => s.id === sel.serverId);
+  const crumbCwd = current?.cwd || sel.cwd || "";
+  const crumbDir = lastPathSeg(crumbCwd) || "—";
+  const crumbName = current ? sessLabel(current) : "";
 
   return (
     <div className={`app${depot.collapsed ? " collapsed" : ""}`}>
@@ -229,8 +235,11 @@ export default function Page() {
       <div className="main">
         {current ? (
           <>
-            <div className="pathcrumb">
-              {sel.serverId} · {current.cwd || sel.cwd || "—"} · {current.id}
+            <div
+              className="pathcrumb"
+              title={`${crumbServer?.label || sel.serverId} · ${crumbCwd || "—"} · ${current.id}`}
+            >
+              {crumbServer?.label || crumbServer?.host || sel.serverId} · {crumbDir} · {crumbName}
             </div>
             <PendingBar
               id={current.id}
@@ -242,7 +251,7 @@ export default function Page() {
         ) : null}
         {current ? <Transcript events={events} /> : <div className="empty">选择一个会话</div>}
         <Composer
-          id={sel.sessionId}
+          id={current ? sel.sessionId : null}
           serverId={sel.serverId}
           held={current?.lock === "operator"}
           enabled={connected && Boolean(current?.alive)}

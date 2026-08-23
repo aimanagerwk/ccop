@@ -96,10 +96,21 @@ describe("foldTranscript", () => {
       ev({ kind: "failed", summary: "process death", extra: { error: "boom" } }),
     ];
     expect(foldTranscript(events)).toEqual([
-      { type: "tool", name: "Bash" },
-      { type: "needs_decision", text: "can_use_tool parked Bash" },
+      { type: "tool", name: "Bash", detail: "", input: {} },
+      { type: "needs_decision", text: "需要批准：Bash" },
       { type: "failed", text: "boom" },
     ]);
+  });
+
+  it("rewrites ask / PermissionRequest into 需要批准", () => {
+    expect(
+      foldTranscript([ev({ kind: "needs_decision", summary: "ask", extra: { reason: "ask" } })]),
+    ).toEqual([{ type: "needs_decision", text: "需要批准" }]);
+    expect(
+      foldTranscript([
+        ev({ kind: "needs_decision", summary: "PermissionRequest Write", extra: { tool: "Write" } }),
+      ]),
+    ).toEqual([{ type: "needs_decision", text: "需要批准：Write" }]);
   });
 
   it("shows real prose summary, skips placeholder assistant/init/thinking_tokens", () => {
@@ -125,8 +136,100 @@ describe("foldTranscript", () => {
     ];
     expect(foldTranscript(events)).toEqual([
       { type: "thinking", n: 2 },
-      { type: "tool", name: "Read" },
+      { type: "tool", name: "Read", detail: "", input: {} },
       { type: "thinking", n: 1 },
     ]);
+  });
+
+  it("labels Read/Bash/Write/Edit/Task from extra.input", () => {
+    expect(
+      foldTranscript([
+        ev({
+          kind: "working",
+          summary: "tool Read",
+          extra: { tool: "Read", input: { file_path: "/workspace/ccop/web/src/lib/session-dot.ts" } },
+        }),
+      ]),
+    ).toEqual([
+      {
+        type: "tool",
+        name: "Read",
+        detail: "session-dot.ts",
+        input: { file_path: "/workspace/ccop/web/src/lib/session-dot.ts" },
+      },
+    ]);
+    expect(
+      foldTranscript([
+        ev({
+          kind: "working",
+          summary: "tool Bash",
+          extra: { tool: "Bash", input: { command: "ls -la /tmp\necho more" } },
+        }),
+      ]),
+    ).toEqual([
+      { type: "tool", name: "Bash", detail: "ls -la /tmp", input: { command: "ls -la /tmp\necho more" } },
+    ]);
+    expect(
+      foldTranscript([
+        ev({
+          kind: "working",
+          summary: "tool Write",
+          extra: { tool: "Write", input: { file_path: "/workspace/ccop/web/src/foo.ts", content: "x" } },
+        }),
+      ]),
+    ).toEqual([
+      {
+        type: "tool",
+        name: "Write",
+        detail: "/workspace/ccop/web/src/foo.ts",
+        input: { file_path: "/workspace/ccop/web/src/foo.ts", content: "x" },
+      },
+    ]);
+    expect(
+      foldTranscript([
+        ev({
+          kind: "working",
+          summary: "tool Edit",
+          extra: { tool: "Edit", input: { file_path: "/workspace/ccop/a.ts" } },
+        }),
+      ]),
+    ).toEqual([
+      { type: "tool", name: "Edit", detail: "/workspace/ccop/a.ts", input: { file_path: "/workspace/ccop/a.ts" } },
+    ]);
+    expect(
+      foldTranscript([
+        ev({
+          kind: "working",
+          summary: "tool Task",
+          extra: { tool: "Task", input: { description: "扫一遍测试", prompt: "long" } },
+        }),
+      ]),
+    ).toEqual([
+      {
+        type: "tool",
+        name: "Task",
+        detail: "扫一遍测试",
+        input: { description: "扫一遍测试", prompt: "long" },
+      },
+    ]);
+  });
+
+  it("hides Pre/Post tool hooks, empty Object, and Stop hooks", () => {
+    const events = [
+      ev({ kind: "working", summary: "PreToolUse", extra: { tool_name: "Read" } }),
+      ev({ kind: "working", summary: "PostToolUse", extra: { tool_name: "Read" } }),
+      ev({ kind: "working", summary: "Object" }),
+      ev({ kind: "working", summary: "Stop hook" }),
+      ev({ kind: "working", summary: "Stop" }),
+      ev({ kind: "working", summary: "init" }),
+    ];
+    expect(foldTranscript(events)).toEqual([{ type: "system", items: ["初始化"] }]);
+    expect(
+      foldTranscript([
+        ev({ kind: "working", summary: "PreToolUse" }),
+        ev({ kind: "working", summary: "Object" }),
+        ev({ kind: "working", summary: "Stop hook" }),
+      ]),
+    ).toEqual([]);
   });
 });

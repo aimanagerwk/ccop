@@ -1,15 +1,29 @@
 "use client";
 
+import { memo, useMemo } from "react";
 import type { ClassifiedEvent } from "../lib/protocol";
 import { foldTranscript, type FoldedRow } from "../lib/fold-transcript";
+import { parseMdLite } from "../lib/md-lite";
+
+const MdBody = memo(function MdBody(props: { text: string }) {
+  return (
+    <>
+      {parseMdLite(props.text).map((p, i) => {
+        if (p.t === "br") return <br key={i} />;
+        if (p.t === "code") return <code key={i}>{p.v}</code>;
+        if (p.t === "bold") return <strong key={i}>{p.v}</strong>;
+        return <span key={i}>{p.v}</span>;
+      })}
+    </>
+  );
+});
 
 function Row(props: { row: FoldedRow; i: number }) {
   const { row, i } = props;
   if (row.type === "thinking") {
     return (
       <div key={i} className="ev thinking mute-row">
-        <span className="k">思考</span>
-        <span>思考 · {row.n}</span>
+        <span className="k">思考 · {row.n}</span>
       </div>
     );
   }
@@ -35,15 +49,28 @@ function Row(props: { row: FoldedRow; i: number }) {
     return (
       <div key={i} className="ev bubble assistant">
         <div className="who">助手</div>
-        <div className="body">{row.text}</div>
+        <div className="body">
+          <MdBody text={row.text} />
+        </div>
       </div>
     );
   }
   if (row.type === "tool") {
+    const title = row.detail ? `工具 · ${row.name} · ${row.detail}` : `工具 · ${row.name}`;
+    const keys = Object.keys(row.input);
+    if (!keys.length) {
+      return (
+        <div key={i} className="ev tool mute-row">
+          <span className="k">{title}</span>
+        </div>
+      );
+    }
     return (
       <div key={i} className="ev tool mute-row">
-        <span className="k">工具</span>
-        <span>工具 · {row.name}</span>
+        <details>
+          <summary className="k">{title}</summary>
+          <pre className="think-body">{JSON.stringify(row.input, null, 2)}</pre>
+        </details>
       </div>
     );
   }
@@ -102,7 +129,7 @@ function Row(props: { row: FoldedRow; i: number }) {
 }
 
 export function Transcript(props: { events: ClassifiedEvent[] }) {
-  const rows = foldTranscript(props.events);
+  const rows = useMemo(() => foldTranscript(props.events), [props.events]);
   if (!props.events.length) {
     return <div className="transcript tiny">还没有记录。从左侧新建会话，或选择一个已有会话。</div>;
   }

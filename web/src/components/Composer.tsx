@@ -1,8 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { rpc } from "../lib/client";
 import { composeAttachMessage, uploadTempNote } from "../lib/upload-message";
+
+type Draft = { text: string; note: string };
 
 export function Composer(props: {
   id: string | null;
@@ -10,11 +12,33 @@ export function Composer(props: {
   held: boolean;
   enabled: boolean;
 }) {
+  const drafts = useRef<Record<string, Draft>>({});
+  const lastId = useRef<string | null>(null);
   const [text, setText] = useState("");
   const [err, setErr] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const live = useRef({ text: "", note: "" });
+  live.current = { text, note };
+
+  useEffect(() => {
+    if (lastId.current) drafts.current[lastId.current] = live.current;
+    const next = props.id ? drafts.current[props.id] || { text: "", note: "" } : { text: "", note: "" };
+    setText(next.text);
+    setNote(next.note);
+    setErr("");
+    lastId.current = props.id;
+    if (fileRef.current) fileRef.current.value = "";
+  }, [props.id]);
+
+  if (!props.id) {
+    return (
+      <div className="bottom empty-bar">
+        <div className="composer-hint">选中会话后再发</div>
+      </div>
+    );
+  }
 
   async function send() {
     if (!props.id) return;
@@ -25,6 +49,8 @@ export function Composer(props: {
       return;
     }
     setText("");
+    setNote("");
+    if (props.id) drafts.current[props.id] = { text: "", note: "" };
   }
 
   async function upload(file: File) {
@@ -50,8 +76,10 @@ export function Composer(props: {
       setErr(String(sent.error || "文件已保存，但通知会话失败"));
       return;
     }
-    setNote(uploadTempNote(res.path));
+    const saved = uploadTempNote(res.path);
+    setNote(saved);
     setText("");
+    if (props.id) drafts.current[props.id] = { text: "", note: saved };
     if (fileRef.current) fileRef.current.value = "";
   }
 

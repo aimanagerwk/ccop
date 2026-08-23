@@ -3,7 +3,8 @@
 import { useState } from "react";
 import type { SessionRow } from "../lib/protocol";
 import type { DepotServer, DepotState } from "../lib/depot-store";
-import { serverKey } from "../lib/depot-store";
+import { lastPathSeg, serverKey, sessLabel } from "../lib/depot-store";
+import { sessionDotClass } from "../lib/session-dot";
 
 export type TreeSel = {
   serverId: string | null;
@@ -17,15 +18,6 @@ function groupByCwd(sessions: SessionRow[], pinned: string[]): string[] {
     if (s.cwd) set.add(s.cwd);
   }
   return [...set].sort();
-}
-
-function sessLabel(s: SessionRow): string {
-  return s.title || s.name || s.id.slice(0, 8);
-}
-
-function cwdLabel(cwd: string): string {
-  const parts = cwd.split("/").filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : cwd;
 }
 
 export function PathTree(props: {
@@ -56,18 +48,18 @@ export function PathTree(props: {
     return (
       <aside className="rail">
         <div className="collapsed-rail">
-          <button className="ghost" aria-label="展开侧栏" onClick={props.onToggleCollapsed}>
+          <button className="ghost rail-icon" aria-label="展开侧栏" onClick={props.onToggleCollapsed}>
             »
           </button>
           {props.depot.servers.map((s) => (
             <button
               key={s.id}
-              className="ghost"
+              className="ghost rail-icon"
               title={s.label}
               aria-label={s.label}
               onClick={() => props.onSelectServer(s.id)}
             >
-              <span className={`dot ${props.live[s.id] ? "live" : ""}`} />
+              <span className={`dot ${props.live[s.id] ? "live" : "ended"}`} />
             </button>
           ))}
         </div>
@@ -79,7 +71,16 @@ export function PathTree(props: {
     <aside className="rail">
       <div className="rail-head">
         <h1 className="rail-title">会话</h1>
-        <button className="ghost" aria-label="收起侧栏" onClick={props.onToggleCollapsed}>
+        <button
+          type="button"
+          className="iconbtn"
+          title="添加服务器"
+          aria-label="添加服务器"
+          onClick={() => setAddingSrv((v) => !v)}
+        >
+          +
+        </button>
+        <button className="ghost rail-icon" aria-label="收起侧栏" onClick={props.onToggleCollapsed}>
           «
         </button>
       </div>
@@ -105,33 +106,49 @@ export function PathTree(props: {
                   }}
                 >
                   <span className="chev">{open ? "▾" : "▸"}</span>
-                  <span className={`dot ${live ? "live" : "halt"}`} />
+                  <span className={`dot ${live ? "live" : "ended"}`} />
                   <span className="trow-name">{srv.label || srv.host}</span>
-                  <span className="trow-id">
+                  <span className="trow-meta">
                     {srv.host}:{srv.port} {live ? "已连接" : "未连接"}
                   </span>
                 </button>
                 <div className="trow-acts">
                   <button
                     type="button"
+                    className="plus-act"
+                    title="新建会话"
+                    aria-label="新建会话"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const key = `${srv.id}|`;
+                      setStartFor(startFor === key ? null : key);
+                    }}
+                  >
+                    +
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-act"
                     title="编辑服务器"
+                    aria-label="编辑服务器"
                     onClick={(e) => {
                       e.stopPropagation();
                       setEditId(editId === srv.id ? null : srv.id);
                     }}
                   >
-                    编辑
+                    ✎
                   </button>
                   <button
                     type="button"
-                    className="danger"
+                    className="danger icon-act"
                     title="移除服务器"
+                    aria-label="移除服务器"
                     onClick={(e) => {
                       e.stopPropagation();
                       props.onDropServer(srv.id);
                     }}
                   >
-                    移除
+                    ×
                   </button>
                 </div>
               </div>
@@ -145,6 +162,17 @@ export function PathTree(props: {
                         setEditId(null);
                       }}
                       onCancel={() => setEditId(null)}
+                    />
+                  ) : null}
+                  {startFor === `${srv.id}|` ? (
+                    <StartFields
+                      cwd={props.depot.pinnedCwds[srv.id]?.[0] || "/workspace"}
+                      cwdEditable
+                      onStart={async (prompt, name, cwd) => {
+                        await props.onStart(srv.id, cwd, prompt, name);
+                        setStartFor(null);
+                      }}
+                      onCancel={() => setStartFor(null)}
                     />
                   ) : null}
                   {cwds.map((cwd) => {
@@ -168,26 +196,29 @@ export function PathTree(props: {
                             }}
                           >
                             <span className="chev">{cOpen ? "▾" : "▸"}</span>
-                            <span className="trow-name path">{cwdLabel(cwd)}</span>
-                            <span className="trow-id">{cwd}</span>
+                            <span className="trow-name path">{lastPathSeg(cwd)}</span>
+                            <span className="trow-meta" title={cwd}>
+                              {cwd}
+                            </span>
                           </button>
                           <div className="trow-acts">
                             <button
                               type="button"
+                              className="plus-act"
                               title="新建会话"
+                              aria-label="新建会话"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setStartFor(startFor === ck ? null : ck);
                               }}
                             >
-                              新建
+                              +
                             </button>
                           </div>
                         </div>
                         {cOpen ? (
                           <>
                             {here.map((s) => {
-                              const pending = s.pending?.length ?? 0;
                               const on = props.selected.sessionId === s.id;
                               return (
                                 <div key={s.id} className={`trow indent-2 ${on ? "on" : ""}`}>
@@ -197,24 +228,24 @@ export function PathTree(props: {
                                     onClick={() => props.onSelectSession(srv.id, s.cwd, s.id)}
                                   >
                                     <span className="chev" />
-                                    <span className={`dot ${s.alive ? "live" : "halt"} ${pending ? "warn" : ""}`} />
+                                    <span className={`dot ${sessionDotClass(s)}`} />
                                     <span className="trow-name">{sessLabel(s)}</span>
                                     {props.badges[s.id] && props.selected.sessionId !== s.id ? (
                                       <span className="badge" />
                                     ) : null}
-                                    <span className="trow-id">{s.id}</span>
                                   </button>
                                   <div className="trow-acts">
                                     <button
                                       type="button"
-                                      className="danger"
+                                      className="danger icon-act"
                                       title="停止会话"
+                                      aria-label="停止会话"
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         void props.onStop(srv.id, s.id);
                                       }}
                                     >
-                                      停止
+                                      ■
                                     </button>
                                   </div>
                                 </div>
@@ -223,8 +254,8 @@ export function PathTree(props: {
                             {startFor === ck ? (
                               <StartFields
                                 cwd={cwd}
-                                onStart={async (prompt, name) => {
-                                  await props.onStart(srv.id, cwd, prompt, name);
+                                onStart={async (prompt, name, startCwd) => {
+                                  await props.onStart(srv.id, startCwd, prompt, name);
                                   setStartFor(null);
                                 }}
                                 onCancel={() => setStartFor(null)}
@@ -254,11 +285,8 @@ export function PathTree(props: {
           );
         })}
       </div>
-      <div className="rail-foot">
-        <button type="button" className="quiet-add" onClick={() => setAddingSrv((v) => !v)}>
-          添加服务器
-        </button>
-        {addingSrv ? (
+      {addingSrv ? (
+        <div className="rail-overlay" role="dialog" aria-label="添加服务器">
           <ServerFields
             initial={null}
             onSave={(next) => {
@@ -267,8 +295,8 @@ export function PathTree(props: {
             }}
             onCancel={() => setAddingSrv(false)}
           />
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </aside>
   );
 }
@@ -305,7 +333,7 @@ function ServerFields(props: {
         type="password"
         value={token}
         onChange={(e) => setToken(e.target.value)}
-        placeholder="CCOP_TOKEN"
+        placeholder="令牌"
         autoComplete="off"
       />
       <div className="actions">
@@ -322,11 +350,13 @@ function ServerFields(props: {
 
 function StartFields(props: {
   cwd: string;
-  onStart: (prompt: string, name: string) => Promise<void>;
+  cwdEditable?: boolean;
+  onStart: (prompt: string, name: string, cwd: string) => Promise<void>;
   onCancel: () => void;
 }) {
   const [prompt, setPrompt] = useState("");
   const [name, setName] = useState("");
+  const [cwd, setCwd] = useState(props.cwd);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   return (
@@ -334,18 +364,29 @@ function StartFields(props: {
       className="sheet"
       onSubmit={(e) => {
         e.preventDefault();
+        if (!cwd.startsWith("/")) {
+          setErr("目录须以 / 开头");
+          return;
+        }
         setBusy(true);
         setErr("");
         void props
-          .onStart(prompt, name)
+          .onStart(prompt, name, cwd)
           .then(() => setPrompt(""))
           .catch((ex: unknown) => setErr(ex instanceof Error ? ex.message : String(ex)))
           .finally(() => setBusy(false));
       }}
     >
-      <div className="tiny" style={{ padding: 0 }}>
-        {props.cwd}
-      </div>
+      {props.cwdEditable ? (
+        <>
+          <label htmlFor="st-cwd">目录</label>
+          <input id="st-cwd" value={cwd} onChange={(e) => setCwd(e.target.value)} />
+        </>
+      ) : (
+        <div className="tiny" style={{ padding: 0 }}>
+          {props.cwd}
+        </div>
+      )}
       <label htmlFor="st-name">名称</label>
       <input id="st-name" value={name} onChange={(e) => setName(e.target.value)} />
       <label htmlFor="st-prompt">初始消息</label>

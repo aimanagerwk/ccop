@@ -54,3 +54,12 @@ export function pinCwd(state: DepotState, serverId: string, cwd: string): DepotS
   if (cur.includes(cwd)) return state;
   return { ...state, pinnedCwds: { ...state.pinnedCwds, [serverId]: [...cur, cwd] } };
 }
+
+export function lastPathSeg(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : path;
+}
+
+export function sessLabel(s: { title?: string | null; name?: string; id: string }): string {
+  return s.title || s.name || s.id.slice(0, 8);
+}

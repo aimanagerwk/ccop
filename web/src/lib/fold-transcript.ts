@@ -1,5 +1,7 @@
 /** Fold raw ClassifiedEvents into conversation rows. Does not mutate input. */
 
+import { lastPathSeg } from "./depot-store";
+
 export type FoldEvent = {
   kind: string;
   summary: string;
@@ -11,7 +13,7 @@ export type FoldedRow =
   | { type: "thinking_text"; text: string }
   | { type: "user"; text: string }
   | { type: "assistant"; text: string }
-  | { type: "tool"; name: string }
+  | { type: "tool"; name: string; detail: string; input: Record<string, unknown> }
   | { type: "needs_decision"; text: string }
   | { type: "needs_info"; text: string }
   | { type: "failed"; text: string }
@@ -40,6 +42,8 @@ const HIDE_SUMMARIES = new Set([
 ]);
 
 const HIDE_KINDS = new Set(["idle", "held", "interrupted"]);
+
+const SILENT_SUMMARIES = new Set(["PreToolUse", "PostToolUse", "Stop hook", "Stop", "Object"]);
 
 const SYSTEM_LABEL: Record<string, string> = {
   connected: "已连接",
@@ -131,7 +135,49 @@ function isEmptyAssistant(e: FoldEvent): boolean {
 }
 
 function isSilent(e: FoldEvent): boolean {
-  return HIDE_KINDS.has(e.kind) || isEmptyAssistant(e);
+  return HIDE_KINDS.has(e.kind) || isEmptyAssistant(e) || SILENT_SUMMARIES.has((e.summary || "").trim());
+}
+
+function inputOf(e: FoldEvent): Record<string, unknown> {
+  const raw = extraOf(e).input;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw as Record<string, unknown>;
+  return {};
+}
+
+function pathOf(input: Record<string, unknown>): string {
+  for (const k of ["file_path", "path"]) {
+    const v = input[k];
+    if (typeof v === "string" && v.trim()) return v;
+  }
+  return "";
+}
+
+function headLine(s: string, max = 80): string {
+  const line = s.split(/\r?\n/, 1)[0].replace(/\s+/g, " ").trim();
+  if (line.length <= max) return line;
+  return `${line.slice(0, max)}…`;
+}
+
+export function toolDetail(name: string, input: Record<string, unknown>): string {
+  const path = pathOf(input);
+  if (name === "Read" && path) return lastPathSeg(path);
+  if ((name === "Write" || name === "Edit") && path) return path;
+  if (name === "Bash") {
+    const cmd = typeof input.command === "string" ? input.command : "";
+    if (cmd) return headLine(cmd);
+  }
+  if (name === "Task" || name.startsWith("Task")) {
+    for (const k of ["description", "subject", "summary", "prompt"]) {
+      const v = input[k];
+      if (typeof v === "string" && v.trim()) return headLine(v);
+    }
+  }
+  return "";
+}
+
+function toolRow(name: string, e: FoldEvent): Extract<FoldedRow, { type: "tool" }> {
+  const input = inputOf(e);
+  return { type: "tool", name, detail: toolDetail(name, input), input };
 }
 
 function isNoise(e: FoldEvent): boolean {
@@ -151,6 +197,20 @@ function systemLabel(e: FoldEvent): string {
 
 function visibleText(e: FoldEvent, keys: string[]): string {
   return extraStr(extraOf(e), keys) || (isPlaceholderSummary(e.summary) ? "" : e.summary) || "";
+}
+
+export function decisionLabel(e: FoldEvent): string {
+  const extra = extraOf(e);
+  const s = (e.summary || "").trim();
+  const named =
+    toolName(e) ||
+    hookToolName(e) ||
+    /PermissionRequest\s+(\S+)/i.exec(s)?.[1] ||
+    /can_use_tool parked\s+(\S+)/i.exec(s)?.[1] ||
+    "";
+  if (named) return `需要批准：${named}`;
+  if (s === "ask" || extra.reason === "ask") return "需要批准";
+  return visibleText(e, ["result", "text", "error"]) || s || "需要批准";
 }
 
 export function foldTranscript(events: readonly FoldEvent[]): FoldedRow[] {
@@ -186,7 +246,10 @@ export function foldTranscript(events: readonly FoldEvent[]): FoldedRow[] {
     }
 
     if (e.kind === "needs_decision" || e.kind === "needs_info" || e.kind === "failed" || e.kind === "dead") {
-      const text = visibleText(e, ["result", "text", "error", "reason"]) || e.summary;
+      const text =
+        e.kind === "needs_decision"
+          ? decisionLabel(e)
+          : visibleText(e, ["result", "text", "error"]) || e.summary;
       rows.push({ type: e.kind, text });
       i += 1;
       continue;
@@ -207,7 +270,7 @@ export function foldTranscript(events: readonly FoldEvent[]): FoldedRow[] {
 
     const tool = toolName(e);
     if (tool) {
-      rows.push({ type: "tool", name: tool });
+      rows.push(toolRow(tool, e));
       i += 1;
       continue;
     }
@@ -232,7 +295,7 @@ export function foldTranscript(events: readonly FoldEvent[]): FoldedRow[] {
 
     const hookTool = hookToolName(e);
     if (hookTool) {
-      rows.push({ type: "tool", name: hookTool });
+      rows.push(toolRow(hookTool, e));
       i += 1;
       continue;
     }
