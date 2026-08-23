@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import * as classify from "../src/classify.js";
+import type { FoldedRow } from "../web/src/lib/fold-transcript.js";
 import { foldTranscript } from "../web/src/lib/fold-transcript.js";
-import { filterGroups } from "../web/src/lib/timeline-filter.js";
+import { filterGroups, rowVisibleText, sanitizeQuery } from "../web/src/lib/timeline-filter.js";
 import { groupTurns } from "../web/src/lib/timeline-turn.js";
 
 describe("fold then groupTurns then filterGroups", () => {
@@ -34,6 +35,32 @@ describe("fold then groupTurns then filterGroups", () => {
     expect(filtered).toHaveLength(1);
     expect(filtered[0].turnId).toBe(0);
     expect(filtered[0].rows[0].type).toBe("system");
+  });
+
+  it("query matching the visible tail of a long system item keeps that prelude turn", () => {
+    const tail = "SYS_TAIL_VISIBLE_TOKEN";
+    const sys: FoldedRow = { type: "system", items: [`${"n".repeat(300)}${tail}`] };
+    const sent = classify.fromSent({ text: "hello" })[0];
+    const groups = groupTurns([sys, ...foldTranscript([sent])]);
+    expect(rowVisibleText(sys).join("")).toContain(tail);
+    const filtered = filterGroups(groups, { q: tail });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].turnId).toBe(0);
+    expect(filtered[0].rows[0]).toBe(sys);
+  });
+
+  it("zero-width padded unique user text still selects that turn", () => {
+    const s1 = classify.fromSent({ text: "alpha-turn-unique" })[0];
+    const done1 = classify.fromResult({ is_error: false, result: "reply-one" });
+    const s2 = classify.fromSent({ text: "beta-other" })[0];
+    const groups = groupTurns(foldTranscript([s1, ...done1, s2]));
+    const q = `${"\u200b".repeat(195)}alpha-turn-unique`;
+    expect(sanitizeQuery({ q }).needle).toBe("alpha-turn-unique");
+    const filtered = filterGroups(groups, { q });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes("alpha-turn-unique"))).toBe(
+      true,
+    );
   });
 
   it("type filter tool plus needle on name survives the pipeline", () => {

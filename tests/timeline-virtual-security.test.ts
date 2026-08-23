@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as virt from "../web/src/lib/timeline-virtual.js";
 import {
   DEFAULT_OVERSCAN,
   DEFAULT_ROW_HEIGHT,
@@ -150,6 +151,27 @@ describe("timeline-virtual security", () => {
         overscan: DEFAULT_OVERSCAN,
       }),
     ).toEqual(["a", "b"]);
+  });
+
+  it("endScrollTop never throws on NaN Infinity or huge counts", () => {
+    expect(typeof virt.endScrollTop).toBe("function");
+    const endScrollTop = virt.endScrollTop as (p: {
+      count: number;
+      viewportHeight: number;
+      rowHeight: number;
+    }) => number;
+    const hostiles = [
+      { count: Number.NaN, viewportHeight: 400, rowHeight: 72 },
+      { count: Number.POSITIVE_INFINITY, viewportHeight: Number.POSITIVE_INFINITY, rowHeight: 72 },
+      { count: 80, viewportHeight: Number.NaN, rowHeight: Number.NEGATIVE_INFINITY },
+      { count: 1e16, viewportHeight: 400, rowHeight: 72 },
+    ];
+    for (const p of hostiles) {
+      expect(() => endScrollTop(p)).not.toThrow();
+      const v = endScrollTop(p);
+      expect(Number.isFinite(v)).toBe(true);
+      expect(v).toBeGreaterThanOrEqual(0);
+    }
   });
 
   it("virtualWindow overscan above cap is clamped", () => {

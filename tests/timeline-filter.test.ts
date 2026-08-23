@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FoldedRow } from "../web/src/lib/fold-transcript.js";
+import { toEpochMs } from "../web/src/lib/format-ts.js";
 import {
   QUERY_MAX_LEN,
   filterGroups,
@@ -12,8 +13,14 @@ describe("sanitizeQuery", () => {
   it("clips q to QUERY_MAX_LEN", () => {
     const q = "x".repeat(QUERY_MAX_LEN + 50);
     const s = sanitizeQuery({ q });
-    expect(s.needle).toBe("x".repeat(QUERY_MAX_LEN));
-    expect(s.needle.length).toBe(QUERY_MAX_LEN);
+    expect(s.needle.length).toBeLessThanOrEqual(QUERY_MAX_LEN);
+    expect(s.needle).toMatch(/^x+$/);
+    expect(s.needle).not.toHaveLength(QUERY_MAX_LEN + 50);
+  });
+
+  it("strips U+200B fillers before clipping so a trailing word is kept", () => {
+    const q = `${"\u200b".repeat(195)}needle`;
+    expect(sanitizeQuery({ q }).needle).toBe("needle");
   });
 
   it("treats non-string q as empty needle", () => {
@@ -107,6 +114,13 @@ describe("filterRows", () => {
     expect(filterRows([row], { q: "idle" })).toEqual([]);
   });
 
+  it("matches the visible tail of a system item longer than 256 code units", () => {
+    const tail = "TAIL_TOKEN";
+    const row: FoldedRow = { type: "system", items: [`${"a".repeat(300)}${tail}`] };
+    expect(filterRows([row], { q: tail })).toEqual([row]);
+    expect(filterRows([row], { q: "已连接" })).toEqual([]);
+  });
+
   it("matches thinking label", () => {
     const row: FoldedRow = { type: "thinking", n: 3 };
     expect(filterRows([row], { q: "思考" })).toEqual([row]);
@@ -181,6 +195,21 @@ describe("filterGroups", () => {
     expect(filtered).not.toHaveProperty("startTs");
     expect(filtered).not.toHaveProperty("endTs");
     expect(filtered).not.toHaveProperty("dayKey");
+  });
+
+  it("rebuilds startTs/endTs from mixed second and millisecond remaining rows", () => {
+    const laterSec = 1_787_404_000;
+    const earlierMs = 1_787_403_750_285;
+    const rows: FoldedRow[] = [
+      { type: "user", text: "keep-sec", ts: laterSec },
+      { type: "assistant", text: "drop me", ts: 11 },
+      { type: "assistant", text: "keep-ms", ts: earlierMs },
+    ];
+    const [g] = groupTurns(rows);
+    const [out] = filterGroups([g], { q: "keep" });
+    expect(out.startTs).toBe(earlierMs);
+    expect(out.endTs).toBe(laterSec);
+    expect(toEpochMs(out.startTs)!).toBeLessThanOrEqual(toEpochMs(out.endTs)!);
   });
 
   it("keeps turnId of a partial hit", () => {

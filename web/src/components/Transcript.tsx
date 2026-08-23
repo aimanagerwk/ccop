@@ -1,11 +1,11 @@
 "use client";
 
-import { memo, useCallback, useMemo, useState, type ReactNode, type UIEvent } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from "react";
 import type { ClassifiedEvent } from "../lib/protocol";
 import { clipToolText, foldTranscript, toolCardPresentation, type FoldedRow } from "../lib/fold-transcript";
 import { flattenTimeline, groupTurns, type TimelineItem } from "../lib/timeline-turn";
 import { filterGroups } from "../lib/timeline-filter";
-import { DEFAULT_ROW_HEIGHT, virtualWindow, visibleSlice } from "../lib/timeline-virtual";
+import { DEFAULT_ROW_HEIGHT, endScrollTop, virtualWindow, visibleSlice } from "../lib/timeline-virtual";
 import { parseMdLite } from "../lib/md-lite";
 import { formatDateTimeAttr } from "../lib/format-ts";
 import { formatClock } from "../lib/workflow-monitor";
@@ -142,7 +142,7 @@ function Item(props: { row: FoldedRow }) {
         <summary>系统 · {row.items.length}</summary>
         <ul className="sys-list">
           {row.items.map((it, j) => (
-            <li key={j}>{it}</li>
+            <li key={j}>{clipToolText(it)}</li>
           ))}
         </ul>
       </details>
@@ -198,26 +198,39 @@ function renderItem(item: TimelineItem, i: number) {
 export function Transcript(props: { events: ClassifiedEvent[] }) {
   const [q, setQ] = useState("");
   const [scroll, setScroll] = useState({ scrollTop: 0, viewportHeight: 0 });
+  const listRef = useRef<HTMLDivElement | null>(null);
   const items = useMemo(() => {
     const rows = foldTranscript(props.events);
     return flattenTimeline(filterGroups(groupTurns(rows), { q }));
   }, [props.events, q]);
+  const viewportHeight = scroll.viewportHeight > 0 ? scroll.viewportHeight : 800;
   const win = useMemo(
     () =>
       virtualWindow({
         scrollTop: scroll.scrollTop,
-        viewportHeight: scroll.viewportHeight > 0 ? scroll.viewportHeight : 800,
+        viewportHeight,
         rowHeight: DEFAULT_ROW_HEIGHT,
         count: items.length,
       }),
-    [scroll.scrollTop, scroll.viewportHeight, items.length],
+    [scroll.scrollTop, viewportHeight, items.length],
   );
   const visible = useMemo(() => visibleSlice(items, win), [items, win]);
+  useEffect(() => {
+    const top = endScrollTop({
+      count: items.length,
+      viewportHeight,
+      rowHeight: DEFAULT_ROW_HEIGHT,
+    });
+    setScroll((prev) => (prev.scrollTop === top ? prev : { ...prev, scrollTop: top }));
+    const el = listRef.current;
+    if (el && el.scrollTop !== top) el.scrollTop = top;
+  }, [q, items.length, viewportHeight]);
   const onScroll = useCallback((e: UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
     setScroll({ scrollTop: el.scrollTop, viewportHeight: el.clientHeight });
   }, []);
   const onListRef = useCallback((el: HTMLDivElement | null) => {
+    listRef.current = el;
     if (!el) return;
     setScroll((prev) => {
       if (prev.viewportHeight === el.clientHeight && prev.scrollTop === el.scrollTop) return prev;

@@ -60,11 +60,33 @@ describe("timeline-filter security", () => {
     const unique = "UNIQUE_TAIL_TOKEN";
     const q = `${"z".repeat(QUERY_MAX_LEN)}${unique}`;
     const s = sanitizeQuery({ q });
-    expect(s.needle).toBe("z".repeat(QUERY_MAX_LEN));
+    expect(s.needle.length).toBeLessThanOrEqual(QUERY_MAX_LEN);
     expect(s.needle).not.toContain(unique);
     const row: FoldedRow = { type: "user", text: unique };
     expect(filterRows([row], { q })).toEqual([]);
     expect(filterRows([row], { q: unique })).toEqual([row]);
+  });
+
+  it("zero-width padded query still matches the trailing word and never compiles q as RegExp", () => {
+    const src = readFileSync(new URL("../web/src/lib/timeline-filter.ts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/new RegExp/);
+    expect(src).not.toMatch(/RegExp\s*\(/);
+    const q = `${"\u200b".repeat(195)}needle`;
+    const s = sanitizeQuery({ q });
+    expect(s.needle).toBe("needle");
+    expect(s.needle).not.toBeInstanceOf(RegExp);
+    const miss: FoldedRow = { type: "user", text: "nothing relevant" };
+    const hit: FoldedRow = { type: "user", text: "has needle inside" };
+    expect(filterRows([miss], { q })).toEqual([]);
+    expect(filterRows([hit], { q })).toEqual([hit]);
+  });
+
+  it("clipping 199 BMP chars plus a thumbs-up does not leave a lone surrogate", () => {
+    const thumb = "\u{1F44D}";
+    const q = `${"x".repeat(199)}${thumb}`;
+    const s = sanitizeQuery({ q });
+    expect(s.needle).not.toMatch(/[\uD800-\uDBFF]$/);
+    expect(s.needle.endsWith(thumb) || haystackHas(thumb, s.needle)).toBe(true);
   });
 
   it("3MB tool output is clipped to ~64k and not pushed raw", () => {

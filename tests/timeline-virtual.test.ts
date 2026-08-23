@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as virt from "../web/src/lib/timeline-virtual.js";
 import {
   DEFAULT_OVERSCAN,
   DEFAULT_ROW_HEIGHT,
@@ -93,6 +94,18 @@ describe("virtualWindow", () => {
     expect(win.start).toBe(8);
     expect(win.offsetTop).toBe(8 * 72);
     expect(Number.isFinite(win.offsetTop)).toBe(true);
+  });
+
+  it("endScrollTop pins a long list to the last page and a short list to 0", () => {
+    expect(typeof virt.endScrollTop).toBe("function");
+    const endScrollTop = virt.endScrollTop as (p: {
+      count: number;
+      viewportHeight: number;
+      rowHeight: number;
+    }) => number;
+    expect(endScrollTop({ count: 1, viewportHeight: 400, rowHeight: 72 })).toBe(0);
+    expect(endScrollTop({ count: 80, viewportHeight: 400, rowHeight: 72 })).toBe(80 * 72 - 400);
+    expect(endScrollTop({ count: 0, viewportHeight: 400, rowHeight: 72 })).toBe(0);
   });
 
   it("virtualWindow totalHeight equals count times rowHeight", () => {

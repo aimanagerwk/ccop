@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FoldedRow } from "../web/src/lib/fold-transcript.js";
+import { toEpochMs } from "../web/src/lib/format-ts.js";
 import { flattenTimeline, groupTurns } from "../web/src/lib/timeline-turn.js";
 
 const localNoon = (y: number, m: number, d: number): number =>
@@ -100,6 +101,19 @@ describe("groupTurns", () => {
     const [g] = groupTurns(rows);
     expect(g.startTs).toBe(10);
     expect(g.endTs).toBe(12);
+  });
+
+  it("mixed second and millisecond ts pick chronological originals, not raw numeric min/max", () => {
+    const laterSec = 1_787_404_000;
+    const earlierMs = 1_787_403_750_285;
+    const [g] = groupTurns([
+      { type: "user", text: "a", ts: laterSec },
+      { type: "assistant", text: "b", ts: earlierMs },
+    ]);
+    expect(g.startTs).toBe(earlierMs);
+    expect(g.endTs).toBe(laterSec);
+    expect(toEpochMs(g.startTs)!).toBeLessThanOrEqual(toEpochMs(g.endTs)!);
+    expect(g.startTs).not.toBe(laterSec);
   });
 
   it("does not invent startTs when no row has ts", () => {

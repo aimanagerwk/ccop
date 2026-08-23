@@ -86,6 +86,24 @@ export function sanitizeVirtualParams(p: VirtualParams): Required<VirtualParams>
   return { scrollTop, viewportHeight, rowHeight, count, overscan };
 }
 
+/** Last-page scrollTop so the newest rows sit in view. Hostile numbers become 0. */
+export function endScrollTop(p: {
+  count: number;
+  viewportHeight: number;
+  rowHeight: number;
+}): number {
+  const obj = p && typeof p === "object" && !Array.isArray(p) ? p : {};
+  const s = sanitizeVirtualParams({
+    scrollTop: 0,
+    viewportHeight: ownNumber(obj, "viewportHeight") ?? 0,
+    rowHeight: ownNumber(obj, "rowHeight") ?? 0,
+    count: ownNumber(obj, "count") ?? 0,
+  });
+  const contentHeight = s.count * s.rowHeight;
+  if (!Number.isFinite(contentHeight)) return 0;
+  return Math.max(0, contentHeight - s.viewportHeight);
+}
+
 export function virtualWindow(p: VirtualParams): VirtualWindow {
   const s = sanitizeVirtualParams(p);
   if (s.count === 0) {

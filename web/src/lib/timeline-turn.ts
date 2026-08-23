@@ -1,7 +1,7 @@
 /** Group folded transcript rows into turns. Does not mutate input. */
 
 import type { FoldedRow } from "./fold-transcript";
-import { formatDayLabel, localDayKey } from "./format-ts";
+import { formatDayLabel, localDayKey, toEpochMs } from "./format-ts";
 
 export type TurnGroup = {
   turnId: number;
@@ -37,11 +37,29 @@ function makeGroup(turnId: number, rows: FoldedRow[]): TurnGroup {
   const group: TurnGroup = { turnId, rows };
   let startTs: number | undefined;
   let endTs: number | undefined;
+  let startMs: number | undefined;
+  let endMs: number | undefined;
   for (const row of rows) {
     const ts = finiteTs(row);
     if (ts === undefined) continue;
-    if (startTs === undefined || ts < startTs) startTs = ts;
-    if (endTs === undefined || ts > endTs) endTs = ts;
+    const ms = toEpochMs(ts);
+    if (ms === undefined) continue;
+    if (startMs === undefined || endMs === undefined) {
+      startTs = ts;
+      endTs = ts;
+      startMs = ms;
+      endMs = ms;
+      continue;
+    }
+    if (ms < startMs) {
+      startMs = ms;
+      startTs = ts;
+    } else if (ms > endMs) {
+      endMs = ms;
+      endTs = ts;
+    } else if (ms === startMs || ms === endMs) {
+      if (ts !== startTs && startTs === endTs) endTs = ts;
+    }
   }
   if (startTs !== undefined) group.startTs = startTs;
   if (endTs !== undefined) group.endTs = endTs;

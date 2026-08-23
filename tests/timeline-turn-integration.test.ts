@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as classify from "../src/classify.js";
 import { foldTranscript } from "../web/src/lib/fold-transcript.js";
-import { dayBreaks, formatDateTimeAttr } from "../web/src/lib/format-ts.js";
+import { dayBreaks, formatDateTimeAttr, toEpochMs } from "../web/src/lib/format-ts.js";
 import { filterGroups } from "../web/src/lib/timeline-filter.js";
 import { flattenTimeline, groupTurns } from "../web/src/lib/timeline-turn.js";
 import { DEFAULT_ROW_HEIGHT, virtualWindow, visibleSlice } from "../web/src/lib/timeline-virtual.js";
@@ -107,6 +107,26 @@ describe("classify-or-fold then groupTurns", () => {
     expect(groups[0].rows[0].ts).toBe(tsUser);
     expect(formatDateTimeAttr(groups[0].startTs)).toBe(new Date(tsUser * 1000).toISOString());
   });
+
+  it("mixed second and millisecond event ts stay chronological after classify-or-fold", () => {
+    const laterSec = 1_787_404_000;
+    const earlierMs = 1_787_403_750_285;
+    const sent = withTs(classify.fromSent({ text: "hi" })[0], laterSec);
+    const tool = withTs(
+      classify.fromToolUse({
+        name: "Read",
+        tool_use_id: "t-mix",
+        tool_input: { file_path: "/x.ts" },
+      })[0],
+      earlierMs,
+    );
+    const rows = foldTranscript([sent, tool]);
+    const [g] = groupTurns(rows);
+    expect(g.startTs).toBe(earlierMs);
+    expect(g.endTs).toBe(laterSec);
+    expect(toEpochMs(g.startTs)!).toBeLessThanOrEqual(toEpochMs(g.endTs)!);
+    expect(g.startTs).not.toBe(laterSec);
+  });
 });
 
 describe("filter then virtualWindow pipeline", () => {
@@ -154,5 +174,38 @@ describe("filter then virtualWindow pipeline", () => {
     for (const it of slice) {
       if (it.kind === "row") expect(it.turnId).toBeGreaterThanOrEqual(1);
     }
+  });
+
+  it("endScrollTop after a multi-hit filter includes the last flattened item", async () => {
+    const { endScrollTop } = await import("../web/src/lib/timeline-virtual.js");
+    expect(typeof endScrollTop).toBe("function");
+    const events = [];
+    for (let i = 0; i < 40; i++) {
+      events.push(classify.fromSent({ text: `keep-${i}` })[0]);
+      events.push(...classify.fromResult({ is_error: false, result: `reply ${i}` }));
+    }
+    const items = flattenTimeline(filterGroups(groupTurns(foldTranscript(events)), { q: "keep" }));
+    expect(items.length).toBeGreaterThan(10);
+    const last = items[items.length - 1];
+    const stale = virtualWindow({
+      scrollTop: 0,
+      viewportHeight: 240,
+      rowHeight: DEFAULT_ROW_HEIGHT,
+      count: items.length,
+      overscan: 0,
+    });
+    expect(visibleSlice(items, stale)).not.toContain(last);
+    const win = virtualWindow({
+      scrollTop: endScrollTop({
+        count: items.length,
+        viewportHeight: 240,
+        rowHeight: DEFAULT_ROW_HEIGHT,
+      }),
+      viewportHeight: 240,
+      rowHeight: DEFAULT_ROW_HEIGHT,
+      count: items.length,
+      overscan: 0,
+    });
+    expect(visibleSlice(items, win)).toContain(last);
   });
 });

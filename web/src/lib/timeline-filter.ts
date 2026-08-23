@@ -2,11 +2,11 @@
 
 import { toolCardPresentation, TOOL_OUTPUT_CLIP, type FoldedRow } from "./fold-transcript";
 import type { TurnGroup } from "./timeline-turn";
-import { localDayKey } from "./format-ts";
+import { localDayKey, toEpochMs } from "./format-ts";
 
 export const QUERY_MAX_LEN = 200;
 export const TEXT_CLIP = TOOL_OUTPUT_CLIP;
-export const ITEM_CLIP = 256;
+export const ITEM_CLIP = TEXT_CLIP;
 
 export type FilterQuery = {
   q?: string;
@@ -51,6 +51,52 @@ function clip(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) : s;
 }
 
+function isZeroWidth(code: number): boolean {
+  return (
+    code === 0x200b ||
+    code === 0x200c ||
+    code === 0x200d ||
+    code === 0x2060 ||
+    code === 0xfeff ||
+    (code >= 0x200b && code <= 0x200d)
+  );
+}
+
+function stripZeroWidth(s: string): string {
+  let out = "";
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    if (!isZeroWidth(code)) out += s.charAt(i);
+  }
+  return out;
+}
+
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
+}
+
+/** NFC + strip zero-width + trim, then clip on grapheme / word bounds. */
+function normalizeNeedle(q: string): string {
+  const s = stripZeroWidth(q.normalize("NFC")).trim();
+  if (s.length <= QUERY_MAX_LEN) return s;
+  let end = QUERY_MAX_LEN;
+  if (end > 0 && end < s.length) {
+    const prev = s.charCodeAt(end - 1);
+    const next = s.charCodeAt(end);
+    if (isHighSurrogate(prev) && isLowSurrogate(next)) end += 1;
+    else if (isHighSurrogate(prev)) end -= 1;
+  }
+  let clipped = s.slice(0, end);
+  if (end < s.length && /\S/.test(s.charAt(end)) && /\S$/.test(clipped) && /\s/.test(clipped)) {
+    clipped = clipped.replace(/\s+\S+$/, "");
+  }
+  return clipped;
+}
+
 function ownType(row: unknown): FoldedRow["type"] | undefined {
   if (!row || typeof row !== "object") return undefined;
   if (!own(row, "type")) return undefined;
@@ -78,11 +124,29 @@ function rebuildGroup(turnId: number, rows: FoldedRow[]): TurnGroup {
   const group: TurnGroup = { turnId, rows };
   let startTs: number | undefined;
   let endTs: number | undefined;
+  let startMs: number | undefined;
+  let endMs: number | undefined;
   for (const row of rows) {
     const ts = finiteTs(row);
     if (ts === undefined) continue;
-    if (startTs === undefined || ts < startTs) startTs = ts;
-    if (endTs === undefined || ts > endTs) endTs = ts;
+    const ms = toEpochMs(ts);
+    if (ms === undefined) continue;
+    if (startMs === undefined || endMs === undefined) {
+      startTs = ts;
+      endTs = ts;
+      startMs = ms;
+      endMs = ms;
+      continue;
+    }
+    if (ms < startMs) {
+      startMs = ms;
+      startTs = ts;
+    } else if (ms > endMs) {
+      endMs = ms;
+      endTs = ts;
+    } else if (ts !== startTs && startTs === endTs) {
+      endTs = ts;
+    }
   }
   if (startTs !== undefined) group.startTs = startTs;
   if (endTs !== undefined) group.endTs = endTs;
@@ -101,7 +165,7 @@ export function sanitizeQuery(raw: FilterQuery | unknown): SanitizedQuery {
   if (own(raw, "q")) {
     const q = (raw as { q?: unknown }).q;
     if (typeof q === "string") {
-      needle = q.trim().slice(0, QUERY_MAX_LEN);
+      needle = normalizeNeedle(q);
     }
   }
   let types: Set<FoldedRow["type"]> | null = null;
