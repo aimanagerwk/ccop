@@ -105,3 +105,16 @@ export function inboxRpcArgs(
   if (!canActOnInboxItem(item)) return null;
   return { cmd, id: item.sessionId, tool_use_id: item.tool_use_id, serverId: item.serverId };
 }
+
+/** Drop items already shown on the open session's PendingBar. */
+export function inboxItemsForView(
+  items: InboxItem[],
+  selected: { serverId: string | null; sessionId: string | null },
+): InboxItem[] {
+  if (!Array.isArray(items)) return [];
+  const serverId = selected.serverId;
+  const sessionId = selected.sessionId;
+  if (!serverId || !sessionId) return items;
+  if (!isDepotServerId(serverId) || !isClaudeSessionId(sessionId)) return items;
+  return items.filter((i) => i.serverId !== serverId || i.sessionId !== sessionId);
+}

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { canActOnInboxItem, collectPendingInbox, inboxRpcArgs } from "../web/src/lib/pending-inbox.js";
+import {
+  canActOnInboxItem,
+  collectPendingInbox,
+  inboxItemsForView,
+  inboxRpcArgs,
+} from "../web/src/lib/pending-inbox.js";
 import type { SessionRow } from "../web/src/lib/protocol.js";
 
 const A = "s-127.0.0.1-8787";
@@ -78,6 +83,45 @@ describe("collectPendingInbox", () => {
       [ID2, "z"],
       [ID1, "m"],
     ]);
+  });
+});
+
+describe("inboxItemsForView", () => {
+  it("hides the open session so PendingBar is the only approve row", () => {
+    const items = collectPendingInbox(
+      {
+        [A]: [
+          sess({ id: ID1, pending: [{ tool_use_id: "call-a" }] }),
+          sess({ id: ID2, pending: [{ tool_use_id: "call-b" }] }),
+        ],
+      },
+      { [A]: true },
+    );
+    const view = inboxItemsForView(items, { serverId: A, sessionId: ID1 });
+    expect(view.map((i) => i.tool_use_id)).toEqual(["call-b"]);
+  });
+
+  it("keeps colliding UUIDs on another server", () => {
+    const items = collectPendingInbox(
+      {
+        [A]: [sess({ id: ID1, pending: [{ tool_use_id: "call-a" }] })],
+        [B]: [sess({ id: ID1, pending: [{ tool_use_id: "call-b" }] })],
+      },
+      { [A]: true, [B]: true },
+    );
+    const view = inboxItemsForView(items, { serverId: A, sessionId: ID1 });
+    expect(view).toHaveLength(1);
+    expect(view[0].serverId).toBe(B);
+    expect(view[0].tool_use_id).toBe("call-b");
+  });
+
+  it("shows everything when no session is open", () => {
+    const items = collectPendingInbox(
+      { [A]: [sess({ id: ID1, pending: [{ tool_use_id: "call-a" }] })] },
+      { [A]: true },
+    );
+    expect(inboxItemsForView(items, { serverId: null, sessionId: null })).toEqual(items);
+    expect(inboxItemsForView(items, { serverId: A, sessionId: null })).toEqual(items);
   });
 });
 

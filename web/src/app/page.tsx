@@ -20,7 +20,7 @@ import {
   type DepotServer,
   type DepotState,
 } from "../lib/depot-store";
-import { collectPendingInbox } from "../lib/pending-inbox";
+import { collectPendingInbox, inboxItemsForView } from "../lib/pending-inbox";
 import type { ClassifiedEvent, SessionRow } from "../lib/protocol";
 import { toastPriority } from "../lib/protocol";
 import { buildSessionUrl, parseSessionUrl } from "../lib/session-url";
@@ -291,6 +291,7 @@ export default function Page() {
   const crumbDir = lastPathSeg(crumbCwd) || "—";
   const crumbName = current ? sessLabel(current) : "";
   const inbox = collectPendingInbox(sessionsByServer, live);
+  const inboxView = inboxItemsForView(inbox, { serverId: sel.serverId, sessionId: sel.sessionId });
   const serverLabel = (id: string) => depot.servers.find((s) => s.id === id)?.label || id;
 
   return (
@@ -362,7 +363,7 @@ export default function Page() {
       />
       <div className="main">
         <PendingInbox
-          items={inbox}
+          items={inboxView}
           serverLabel={serverLabel}
           onDone={() => void refreshAll()}
           onOpen={(item) => onSelectSession(item.serverId, item.cwd, item.sessionId)}

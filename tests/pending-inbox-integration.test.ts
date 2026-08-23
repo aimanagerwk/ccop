@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canActOnInboxItem, collectPendingInbox, inboxRpcArgs } from "../web/src/lib/pending-inbox.js";
+import { canActOnInboxItem, collectPendingInbox, inboxItemsForView, inboxRpcArgs } from "../web/src/lib/pending-inbox.js";
 import type { SessionRow } from "../web/src/lib/protocol.js";
 
 const SID = "s-127.0.0.1-8787";
@@ -73,4 +73,14 @@ describe("pending-inbox integration against status shapes", () => {
     expect(JSON.stringify(items[0])).not.toContain("/secret");
     expect(inboxRpcArgs("approve", items[0])).toBeNull();
   });
+
+  it("opening the live session leaves only the session bar actionable", () => {
+    const items = collectPendingInbox({ [SID]: [live, residue] }, { [SID]: true });
+    expect(items).toHaveLength(2);
+    const view = inboxItemsForView(items, { serverId: SID, sessionId: live.id });
+    expect(view.map((i) => i.sessionId)).toEqual([residue.id]);
+    expect(view.every((i) => i.tool_use_id !== "call-7355")).toBe(true);
+    expect(inboxRpcArgs("approve", view[0])).toBeNull();
+  });
 });
+

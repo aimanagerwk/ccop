@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { canActOnInboxItem, collectPendingInbox, inboxRpcArgs } from "../web/src/lib/pending-inbox.js";
+import { canActOnInboxItem, collectPendingInbox, inboxItemsForView, inboxRpcArgs } from "../web/src/lib/pending-inbox.js";
 import type { SessionRow } from "../web/src/lib/protocol.js";
 
 const A = "s-127.0.0.1-8787";
@@ -106,4 +106,12 @@ describe("pending-inbox security", () => {
     expect(canActOnInboxItem({ ...base, actionable: false })).toBe(false);
     expect(inboxRpcArgs("approve", { ...base, serverId: "" })).toBeNull();
   });
+
+  it("inboxItemsForView does not treat a name as the open session", () => {
+    const items = collectPendingInbox({ [A]: [sess({ id: ID, pending: [{ tool_use_id: "call-1" }] })] }, { [A]: true });
+    expect(inboxItemsForView(items, { serverId: A, sessionId: "wf" })).toEqual(items);
+    expect(inboxItemsForView(items, { serverId: "", sessionId: ID })).toEqual(items);
+    expect(inboxItemsForView(items, { serverId: "forged", sessionId: ID })).toEqual(items);
+  });
 });
+
