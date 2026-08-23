@@ -80,6 +80,35 @@ describe("sanitizeQuery", () => {
     expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
   });
 
+  it("the first UTF-16 half of a flag cannot match 🇨🇳 🇨🇦 or 🇺🇸", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const half = china.slice(0, 1);
+    expect(haystackHas(china, half)).toBe(false);
+    expect(haystackHas(canada, half)).toBe(false);
+    expect(haystackHas(us, half)).toBe(false);
+    expect(filterRows([{ type: "user", text: canada }], { q: half })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: half })).toEqual([]);
+    expect(filterRows([{ type: "user", text: us }], { q: half })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
+  it("clipped leftover prefix or first-half flag cannot match other flags", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const half = "\uD83C";
+    const q199 = `${"x".repeat(199)}${half}`;
+    const q200 = `${"x".repeat(200)}${half}`;
+    expect(filterRows([{ type: "user", text: `${"x".repeat(199)}${canada}` }], { q: q199 })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(199)}${us}` }], { q: q199 })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(200)}${canada}` }], { q: q200 })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(200)}${us}` }], { q: q200 })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(200)}${canada}` }], { q: "x".repeat(200) }).length).toBe(1);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
   it("200x then a half or full flag cannot match another padded flag", () => {
     const china = "\u{1F1E8}\u{1F1F3}";
     const canada = "\u{1F1E8}\u{1F1E6}";

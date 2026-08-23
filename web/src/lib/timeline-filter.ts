@@ -172,6 +172,10 @@ function isUnpairedRegionalGrapheme(s: string, start: number, end: number): bool
 
 /** Leading run of regional indicators after a clip point (half or full flags). */
 function leadingRegionalSequence(s: string): string {
+  if (s.length > 0 && isHighSurrogate(s.charCodeAt(0))) {
+    const next = s.length > 1 ? s.charCodeAt(1) : 0;
+    if (!isLowSurrogate(next)) return s.slice(0, 1);
+  }
   let i = 0;
   while (i < s.length) {
     const cp = codePointAt(s, i);
@@ -378,9 +382,24 @@ function riAwareIncludes(haystack: string, needle: string): boolean {
   return false;
 }
 
+function hasLoneSurrogate(s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (isHighSurrogate(c)) {
+      const next = i + 1 < s.length ? s.charCodeAt(i + 1) : 0;
+      if (!isLowSurrogate(next)) return true;
+      i += 1;
+      continue;
+    }
+    if (isLowSurrogate(c)) return true;
+  }
+  return false;
+}
+
 export function haystackHas(haystack: string, needle: string): boolean {
   if (needle === "") return true;
   if (typeof haystack !== "string") return false;
+  if (hasLoneSurrogate(needle)) return false;
   if (hasUnpairedRegionalIndicator(needle)) return false;
   if (!containsRegionalIndicator(needle)) {
     return haystack.toLowerCase().includes(needle.toLowerCase());

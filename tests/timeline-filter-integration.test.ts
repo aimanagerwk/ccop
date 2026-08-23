@@ -169,6 +169,38 @@ describe("fold then groupTurns then filterGroups", () => {
     expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(china))).toBe(true);
   });
 
+  it("the first UTF-16 half of a flag does not select 🇨🇦 🇨🇳 or 🇺🇸 turns", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const half = china.slice(0, 1);
+    const s1 = classify.fromSent({ text: `visit ${canada}` })[0];
+    const done1 = classify.fromResult({ is_error: false, result: "reply-one" });
+    const s2 = classify.fromSent({ text: `visit ${china}` })[0];
+    const done2 = classify.fromResult({ is_error: false, result: "reply-two" });
+    const s3 = classify.fromSent({ text: `visit ${us}` })[0];
+    const groups = groupTurns(foldTranscript([s1, ...done1, s2, ...done2, s3]));
+    expect(filterGroups(groups, { q: half })).toEqual([]);
+    const filtered = filterGroups(groups, { q: china });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(china))).toBe(true);
+  });
+
+  it("clipped leftover prefix or first-half flag does not select another padded flag turn", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const half = "\uD83C";
+    const groups = groupTurns([
+      { type: "user", text: `${"x".repeat(199)}${canada}` },
+      { type: "user", text: `${"x".repeat(200)}${us}` },
+      { type: "user", text: `${"x".repeat(200)}${china}` },
+    ]);
+    expect(filterGroups(groups, { q: `${"x".repeat(199)}${half}` })).toEqual([]);
+    expect(filterGroups(groups, { q: `${"x".repeat(200)}${half}` })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
   it("200x then a half or full flag does not select another padded flag turn", () => {
     const china = "\u{1F1E8}\u{1F1F3}";
     const canada = "\u{1F1E8}\u{1F1E6}";

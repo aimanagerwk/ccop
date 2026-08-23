@@ -279,6 +279,37 @@ describe("timeline-filter security", () => {
     expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
   });
 
+  it("the first UTF-16 half of a flag cannot match every flag", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const half = china.slice(0, 1);
+    const src = readFileSync(new URL("../web/src/lib/timeline-filter.ts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/new RegExp/);
+    expect(src).not.toMatch(/RegExp\s*\(/);
+    expect(haystackHas(china, half)).toBe(false);
+    expect(haystackHas(canada, half)).toBe(false);
+    expect(haystackHas(us, half)).toBe(false);
+    expect(filterRows([{ type: "user", text: canada }], { q: half })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: half })).toEqual([]);
+    expect(filterRows([{ type: "user", text: us }], { q: half })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
+  it("clipped leftover prefix or first-half flag cannot match another padded flag", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const half = "\uD83C";
+    const src = readFileSync(new URL("../web/src/lib/timeline-filter.ts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/new RegExp/);
+    expect(src).not.toMatch(/RegExp\s*\(/);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(199)}${canada}` }], { q: `${"x".repeat(199)}${half}` })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(200)}${canada}` }], { q: `${"x".repeat(200)}${half}` })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(200)}${us}` }], { q: `${"x".repeat(200)}${half}` })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
   it("200x then a half or full flag cannot match another padded flag via a dropped tail", () => {
     const china = "\u{1F1E8}\u{1F1F3}";
     const canada = "\u{1F1E8}\u{1F1E6}";
