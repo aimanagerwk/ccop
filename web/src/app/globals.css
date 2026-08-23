@@ -22,6 +22,7 @@
   --series-1: #3987e5;
   --series-2: #d95926;
   --series-3: #199e70;
+  --series-other: #898781;
   --status-running: #3987e5;
   --status-done: #0ca30c;
   --status-failed: #d03b3b;
@@ -709,8 +710,108 @@ label {
 .flag.alert .k { color: var(--danger); }
 .flag.ok .k { color: var(--ok); }
 
+/* —— 工作流 DAG —— */
+.dag {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #1b1b1b;
+}
+.dag-clock {
+  position: relative;
+  height: 22px;
+  margin: 6px 0 8px 88px;
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.dag-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.dag-now {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+}
+.dag-now-label {
+  position: absolute;
+  top: 0;
+  left: 4px;
+  color: var(--mute);
+}
+.dag-board { margin-top: 8px; }
+.dag-board-head {
+  font-size: 12px;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.dag-tracks { display: grid; gap: 8px; }
+.dag-board.layout-single .dag-tracks { grid-template-columns: 1fr; }
+.dag-track {
+  background: var(--bg);
+  border: 2px solid var(--bg);
+  border-radius: 6px;
+  padding: 6px 8px 8px;
+}
+.dag-track-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  margin-bottom: 6px;
+}
+.dag-lane {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 8px;
+  align-items: center;
+  min-height: 22px;
+  margin-top: 2px;
+}
+.dag-lane-lab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dag-lane-lab.mute { color: var(--mute); }
+.dag-lane-plot {
+  position: relative;
+  height: 8px;
+  background: #1a1a19;
+  border-radius: 4px;
+}
+.dag-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 2px;
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.dag-bar.tone-running { background: var(--status-running); }
+.dag-bar.tone-done { background: var(--status-done); }
+.dag-bar.tone-failed { background: var(--status-failed); }
+.dag-bar.tone-idle { background: var(--mute); }
+.dag-unjoined { margin-top: 8px; }
+.swatch.series-1 { background: var(--series-1); }
+.swatch.series-2 { background: var(--series-2); }
+.swatch.series-3 { background: var(--series-3); }
+.swatch.other { background: var(--series-other); }
+
 @media (max-width: 1100px) {
   .mon-grid, .mon-lists { grid-template-columns: 1fr; }
   .tl-item { grid-template-columns: 16px 1fr; }
   .tl-time { display: none; }
+  .dag-clock { margin-left: 0; }
+  .dag-lane { grid-template-columns: 64px 1fr; }
 }

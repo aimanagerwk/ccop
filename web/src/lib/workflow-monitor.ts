@@ -145,7 +145,7 @@ function extraOf(e: { extra?: Record<string, unknown> | null }): Record<string, 
 }
 
 /** Epoch seconds. Accepts seconds or millisecond timestamps. */
-function asEpochSec(v: unknown): number | undefined {
+export function asEpochSec(v: unknown): number | undefined {
   const n = finiteNum(v);
   if (n === undefined) return undefined;
   return n > 1e12 ? n / 1000 : n;

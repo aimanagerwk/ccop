@@ -3,8 +3,22 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ClassifiedEvent, SessionRow } from "../lib/protocol";
 import {
+  buildDagDomain,
+  buildDagGraph,
+  clockTicks,
+  groupTracksByWorkflow,
+  xOf,
+  type DagBoard,
+  type DagDomainScale,
+  type DagLane,
+  type DagSeries,
+  type DagStatusTone,
+  type DagTrack,
+} from "../lib/workflow-dag";
+import {
   buildMonitorSnapshot,
   clipDisplay,
+  formatClock,
   formatDuration,
   formatTokens,
   formatUsd,
@@ -15,6 +29,168 @@ import {
   tokenBarShares,
   type PctSeg,
 } from "../lib/workflow-monitor";
+
+const SERIES_OK = new Set<DagSeries>(["series-1", "series-2", "series-3", "other"]);
+const TONE_OK = new Set<DagStatusTone>(["running", "done", "failed"]);
+
+function seriesClass(s?: DagSeries): string {
+  return s && SERIES_OK.has(s) ? s : "other";
+}
+
+function toneClass(t?: DagStatusTone): string {
+  return t && TONE_OK.has(t) ? t : "";
+}
+
+function pct(domain: DagDomainScale, ts?: number): number | undefined {
+  const x = xOf(domain, ts);
+  return x === undefined ? undefined : x * 100;
+}
+
+function barStyle(domain: DagDomainScale, start?: number, end?: number, nowSec?: number): { left: string; width: string } | null {
+  const a = start;
+  const b = end ?? nowSec;
+  const left = pct(domain, a);
+  const right = pct(domain, b);
+  if (left === undefined || right === undefined || right < left) return null;
+  const width = Math.max(right - left, 0.6);
+  return { left: `${left}%`, width: `${width}%` };
+}
+
+function DagClock(props: { domain: DagDomainScale; ticks: { ts: number; label: string }[]; nowSec?: number; live: boolean }) {
+  if (props.domain.empty) return null;
+  const nowX = props.live && props.nowSec !== undefined ? pct(props.domain, props.nowSec) : undefined;
+  return (
+    <div className="dag-clock" aria-hidden="true">
+      {props.ticks.map((t) => {
+        const left = pct(props.domain, t.ts);
+        if (left === undefined) return null;
+        return (
+          <span key={t.ts} className="dag-tick" style={{ left: `${left}%` }}>
+            {t.label}
+          </span>
+        );
+      })}
+      {nowX !== undefined ? (
+        <span className="dag-now" style={{ left: `${nowX}%` }} title={formatClock(props.nowSec)}>
+          <span className="dag-now-label">{formatClock(props.nowSec)}</span>
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function TrackPlot(props: {
+  track: DagTrack;
+  lanes: DagLane[];
+  domain: DagDomainScale;
+  nowSec?: number;
+  colorJob: "track" | "lane";
+}) {
+  const wfBar = barStyle(props.domain, props.track.start_ts, props.track.end_ts, props.track.live ? props.nowSec : undefined);
+  const tone = toneClass(props.track.live ? "running" : props.track.status === "completed" ? "done" : props.track.status === "failed" || props.track.status === "killed" || props.track.status === "stopped" ? "failed" : undefined);
+  return (
+    <div className="dag-track">
+      <div className="dag-track-head">
+        {props.colorJob === "track" ? <i className={`swatch ${seriesClass(props.track.series)}`} /> : null}
+        <span className={`dot${props.track.live ? " live pulse" : props.track.status === "completed" ? " idle" : " ended"}`} />
+        <div className="mon-row-main">
+          <div className="mon-row-title" title={props.track.track_id}>
+            {clipDisplay(props.track.workflow_name || props.track.track_id, 48)}
+          </div>
+          <div className="mon-row-meta">
+            {taskStatusLabel(props.track.status)}
+            {props.track.tool_use_id ? ` · ${clipDisplay(props.track.tool_use_id, 20)}` : ""}
+          </div>
+        </div>
+      </div>
+      <div className="dag-lane">
+        <div className="dag-lane-lab mute">轨道</div>
+        <div className="dag-lane-plot">
+          {wfBar ? (
+            <span
+              className={`dag-bar tone-${tone || "idle"}`}
+              style={wfBar}
+              title={`${formatClock(props.track.start_ts)} – ${formatClock(props.track.end_ts ?? props.nowSec)}`}
+            />
+          ) : null}
+        </div>
+      </div>
+      {props.lanes.map((lane) => {
+        const bar = barStyle(props.domain, lane.start_ts, lane.end_ts, lane.live ? props.nowSec : undefined);
+        const lt = toneClass(lane.live ? "running" : lane.status === "completed" ? "done" : "failed");
+        return (
+          <div key={lane.lane_id} className="dag-lane">
+            <div className="dag-lane-lab" title={lane.lane_id}>
+              {props.colorJob === "lane" ? <i className={`swatch ${seriesClass(lane.series)}`} /> : null}
+              {clipDisplay(lane.lane_id, 12)}
+            </div>
+            <div className="dag-lane-plot">
+              {bar ? (
+                <span
+                  className={`dag-bar tone-${lt || "idle"}`}
+                  style={bar}
+                  title={`${clipDisplay(lane.lane_id, 24)} ${formatClock(lane.start_ts)} – ${formatClock(lane.end_ts ?? props.nowSec)}`}
+                />
+              ) : null}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DagBoardView(props: { board: DagBoard; lanes: DagLane[]; domain: DagDomainScale; nowSec?: number }) {
+  const colorJob = props.board.layout === "side-by-side" ? "track" : "lane";
+  const byTrack = new Map<string, DagLane[]>();
+  for (const l of props.lanes) {
+    if (!l.track_id) continue;
+    const list = byTrack.get(l.track_id) || [];
+    list.push(l);
+    byTrack.set(l.track_id, list);
+  }
+  const unjoined = props.board.unjoined_lane_ids
+    .map((id) => props.lanes.find((l) => l.lane_id === id))
+    .filter((l): l is DagLane => !!l);
+  return (
+    <div className={`dag-board layout-${props.board.layout}`}>
+      <div className="dag-board-head">{clipDisplay(props.board.workflow_name === "_unnamed" ? "未命名" : props.board.workflow_name, 64)}</div>
+      <div
+        className="dag-tracks"
+        style={
+          props.board.layout === "side-by-side"
+            ? { gridTemplateColumns: `repeat(${Math.max(props.board.tracks.length, 1)}, minmax(0, 1fr))` }
+            : undefined
+        }
+      >
+        {props.board.tracks.map((t) => (
+          <TrackPlot
+            key={t.track_id}
+            track={t}
+            lanes={byTrack.get(t.track_id) || []}
+            domain={props.domain}
+            nowSec={props.nowSec}
+            colorJob={colorJob}
+          />
+        ))}
+      </div>
+      {unjoined.length ? (
+        <div className="dag-unjoined">
+          <div className="stat-k">未分组</div>
+          {unjoined.map((l) => (
+            <div key={l.lane_id} className="dag-lane">
+              <div className="dag-lane-lab" title={l.lane_id}>
+                {colorJob === "lane" ? <i className={`swatch ${seriesClass(l.series)}`} /> : null}
+                {clipDisplay(l.lane_id, 12)}
+              </div>
+              <div className="dag-lane-plot" />
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function ShareBar(props: { segs: PctSeg[]; tone: "status" | "token"; live?: boolean }) {
   if (!props.segs.length) return <div className="share-bar empty" />;
@@ -53,6 +229,14 @@ export function WorkflowPanel(props: {
       }),
     [props.session, props.info, props.tasks, props.subagents, props.workflows, props.events, now],
   );
+  const dag = useMemo(
+    () => buildDagGraph({ snapshot: snap, events: props.events, now }),
+    [snap, props.events, now],
+  );
+  const domain = useMemo(() => buildDagDomain(dag, now), [dag, now]);
+  const ticks = useMemo(() => clockTicks(domain), [domain]);
+  const boards = useMemo(() => groupTracksByWorkflow(dag, now), [dag, now]);
+  const nowSec = now > 1e12 ? now / 1000 : now > 1e9 ? now : undefined;
   const live = snap.progress.running > 0 || snap.progress.agents_running > 0 || snap.kind === "working";
   useEffect(() => {
     if (!live) return;
@@ -148,6 +332,16 @@ export function WorkflowPanel(props: {
               {clipDisplay(m.model, 28)} · {formatTokens(m.input + m.output)}
               {m.cost_usd != null ? ` · ${formatUsd(m.cost_usd)}` : ""}
             </span>
+          ))}
+        </div>
+      ) : null}
+
+      {boards.length ? (
+        <div className="dag" aria-label="工作流 DAG">
+          <div className="stat-k">工作流 DAG</div>
+          <DagClock domain={domain} ticks={ticks} nowSec={nowSec} live={live} />
+          {boards.map((b) => (
+            <DagBoardView key={b.workflow_name} board={b} lanes={dag.lanes} domain={domain} nowSec={nowSec} />
           ))}
         </div>
       ) : null}
