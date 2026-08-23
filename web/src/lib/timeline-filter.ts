@@ -190,6 +190,22 @@ type NormalizedNeedle = {
   droppedRegional: string;
 };
 
+function firstRegionalInTail(s: string): string {
+  let i = 0;
+  while (i < s.length) {
+    const c = s.charCodeAt(i);
+    if (isHighSurrogate(c)) {
+      const next = i + 1 < s.length ? s.charCodeAt(i + 1) : 0;
+      if (!isLowSurrogate(next)) return s.slice(i, i + 1);
+    }
+    const cp = codePointAt(s, i);
+    if (cp === undefined) break;
+    if (isRegionalIndicator(cp)) return leadingRegionalSequence(s.slice(i));
+    i += codePointWidth(cp);
+  }
+  return "";
+}
+
 /** NFC + strip fillers + trim, then clip on grapheme / word bounds. */
 function normalizeNeedle(q: string): NormalizedNeedle {
   const s = stripFillers(q.normalize("NFC")).trim();
@@ -211,7 +227,7 @@ function normalizeNeedle(q: string): NormalizedNeedle {
   if (end < s.length && /\S/.test(s.charAt(end)) && /\S$/.test(clipped) && /\s/.test(clipped)) {
     clipped = clipped.replace(/\s+\S+$/, "");
   }
-  const droppedRegional = leadingRegionalSequence(s.slice(clipped.length));
+  const droppedRegional = firstRegionalInTail(s.slice(clipped.length));
   return { needle: clipped, droppedRegional };
 }
 

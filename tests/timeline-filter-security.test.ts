@@ -330,6 +330,67 @@ describe("timeline-filter security", () => {
     expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
   });
 
+  it("a single regional indicator U+1F1E8 cannot match any complete flag", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const france = "\u{1F1EB}\u{1F1F7}";
+    const letter = "\u{1F1E8}";
+    const src = readFileSync(new URL("../web/src/lib/timeline-filter.ts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/new RegExp/);
+    expect(src).not.toMatch(/RegExp\s*\(/);
+    expect(haystackHas(china, letter)).toBe(false);
+    expect(haystackHas(canada, letter)).toBe(false);
+    expect(haystackHas(us, letter)).toBe(false);
+    expect(haystackHas(france, letter)).toBe(false);
+    expect(
+      filterRows(
+        [
+          { type: "user", text: china },
+          { type: "user", text: canada },
+          { type: "user", text: us },
+          { type: "user", text: france },
+        ],
+        { q: letter },
+      ),
+    ).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
+  it("after clip, a leftover prefix or dropped half-flag tail cannot match other flags", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const letter = "\u{1F1E8}";
+    const half = "\uD83C";
+    const src = readFileSync(new URL("../web/src/lib/timeline-filter.ts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/new RegExp/);
+    expect(src).not.toMatch(/RegExp\s*\(/);
+    const padded200: FoldedRow[] = [
+      { type: "user", text: `${"x".repeat(200)}${canada}` },
+      { type: "user", text: `${"x".repeat(200)}${us}` },
+      { type: "user", text: `${"x".repeat(200)}${china}` },
+    ];
+    const q201c = `${"x".repeat(201)}${letter}`;
+    const q201hi = `${"x".repeat(201)}${half}`;
+    const q201cn = `${"x".repeat(201)}${china}`;
+    const q202c = `${"x".repeat(202)}${letter}`;
+    expect(sanitizeQuery({ q: q201c }).droppedRegional).toBeTruthy();
+    expect(sanitizeQuery({ q: q201hi }).droppedRegional).toBeTruthy();
+    expect(sanitizeQuery({ q: q201cn }).droppedRegional).toBeTruthy();
+    expect(filterRows(padded200, { q: q201c })).toEqual([]);
+    expect(filterRows(padded200, { q: q201hi })).toEqual([]);
+    expect(
+      filterRows(padded200, { q: q201cn }).some(
+        (r) => r.type === "user" && (r.text.includes(canada) || r.text.includes(us)),
+      ),
+    ).toBe(false);
+    expect(filterRows(padded200, { q: q202c })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(199)}${canada}` }], { q: `${"x".repeat(199)}${letter}` })).toEqual([]);
+    expect(filterRows([{ type: "user", text: `${"x".repeat(197)}${canada}` }], { q: `${"x".repeat(197)} a${letter}` })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
   it("195x U+00AD plus needle is the full word, not needl or a SHY-only needle", () => {
     const q = `${"­".repeat(195)}needle`;
     const s = sanitizeQuery({ q });

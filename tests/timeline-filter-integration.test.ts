@@ -224,6 +224,53 @@ describe("fold then groupTurns then filterGroups", () => {
     expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
   });
 
+  it("a single regional indicator U+1F1E8 does not select any complete flag turn", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const france = "\u{1F1EB}\u{1F1F7}";
+    const letter = "\u{1F1E8}";
+    const s1 = classify.fromSent({ text: `visit ${canada}` })[0];
+    const done1 = classify.fromResult({ is_error: false, result: "reply-one" });
+    const s2 = classify.fromSent({ text: `visit ${china}` })[0];
+    const done2 = classify.fromResult({ is_error: false, result: "reply-two" });
+    const s3 = classify.fromSent({ text: `visit ${us}` })[0];
+    const done3 = classify.fromResult({ is_error: false, result: "reply-three" });
+    const s4 = classify.fromSent({ text: `visit ${france}` })[0];
+    const groups = groupTurns(foldTranscript([s1, ...done1, s2, ...done2, s3, ...done3, s4]));
+    expect(filterGroups(groups, { q: letter })).toEqual([]);
+    const filtered = filterGroups(groups, { q: china });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].rows.some((r) => r.type === "user" && r.text.includes(china))).toBe(true);
+  });
+
+  it("leftover prefix after a dropped half-flag tail does not select other flag turns", () => {
+    const china = "\u{1F1E8}\u{1F1F3}";
+    const canada = "\u{1F1E8}\u{1F1E6}";
+    const us = "\u{1F1FA}\u{1F1F8}";
+    const letter = "\u{1F1E8}";
+    const half = "\uD83C";
+    const groups = groupTurns([
+      { type: "user", text: `${"x".repeat(200)}${canada}` },
+      { type: "user", text: `${"x".repeat(200)}${us}` },
+      { type: "user", text: `${"x".repeat(200)}${china}` },
+    ]);
+    expect(filterGroups(groups, { q: `${"x".repeat(201)}${letter}` })).toEqual([]);
+    expect(filterGroups(groups, { q: `${"x".repeat(201)}${half}` })).toEqual([]);
+    expect(filterGroups(groups, { q: `${"x".repeat(202)}${letter}` })).toEqual([]);
+    expect(
+      filterGroups(groups, { q: `${"x".repeat(201)}${china}` }).some((g) =>
+        g.rows.some((r) => r.type === "user" && (r.text.includes(canada) || r.text.includes(us))),
+      ),
+    ).toBe(false);
+    const wordGroups = groupTurns([
+      { type: "user", text: `${"x".repeat(197)}${canada}` },
+      { type: "user", text: `${"x".repeat(197)}${us}` },
+    ]);
+    expect(filterGroups(wordGroups, { q: `${"x".repeat(197)} a${letter}` })).toEqual([]);
+    expect(filterRows([{ type: "user", text: china }], { q: china }).length).toBe(1);
+  });
+
   it("195x U+00AD + alpha-turn-unique keeps only that turn and not a truncated word", () => {
     const s1 = classify.fromSent({ text: "alpha-turn-unique" })[0];
     const done1 = classify.fromResult({ is_error: false, result: "reply-one" });
