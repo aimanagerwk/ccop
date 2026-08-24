@@ -5,7 +5,7 @@ import type { ClassifiedEvent } from "../lib/protocol";
 import { clipToolText, foldTranscript, toolCardPresentation, type FoldedRow } from "../lib/fold-transcript";
 import { flattenTimeline, groupTurns, type TimelineItem } from "../lib/timeline-turn";
 import { filterGroups } from "../lib/timeline-filter";
-import { DEFAULT_ROW_HEIGHT, endScrollTop, virtualWindow, visibleSlice } from "../lib/timeline-virtual";
+import { DEFAULT_ROW_HEIGHT, endScrollTop, nextScrollTop, virtualWindow, visibleSlice } from "../lib/timeline-virtual";
 import { parseMdLite } from "../lib/md-lite";
 import { formatDateTimeAttr } from "../lib/format-ts";
 import { formatClock } from "../lib/workflow-monitor";
@@ -195,14 +195,25 @@ function renderItem(item: TimelineItem, i: number) {
   return <Item key={`r-${item.turnId}-${i}`} row={item.row} />;
 }
 
-export function Transcript(props: { events: ClassifiedEvent[] }) {
+export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: string }) {
+  const { events, sessionId } = props;
   const [q, setQ] = useState("");
   const [scroll, setScroll] = useState({ scrollTop: 0, viewportHeight: 0 });
   const listRef = useRef<HTMLDivElement | null>(null);
+  const eventsRef = useRef(events);
+  eventsRef.current = events;
+  const followSessionEvents = useRef(true);
+  const eventsAtSession = useRef(events);
+  const sessionPinNow = useRef(true);
+  const prevQ = useRef(q);
+  const prevCount = useRef(0);
+  const prevEndTop = useRef(0);
+  const didLayout = useRef(false);
+  const prevSessionId = useRef(sessionId);
   const items = useMemo(() => {
-    const rows = foldTranscript(props.events);
+    const rows = foldTranscript(events);
     return flattenTimeline(filterGroups(groupTurns(rows), { q }));
-  }, [props.events, q]);
+  }, [events, q]);
   const viewportHeight = scroll.viewportHeight > 0 ? scroll.viewportHeight : 800;
   const win = useMemo(
     () =>
@@ -216,15 +227,55 @@ export function Transcript(props: { events: ClassifiedEvent[] }) {
   );
   const visible = useMemo(() => visibleSlice(items, win), [items, win]);
   useEffect(() => {
-    const top = endScrollTop({
+    setQ("");
+    followSessionEvents.current = true;
+    eventsAtSession.current = eventsRef.current;
+    sessionPinNow.current = true;
+    didLayout.current = false;
+  }, [sessionId]);
+  useEffect(() => {
+    if (prevSessionId.current !== sessionId) {
+      prevSessionId.current = sessionId;
+      setQ("");
+      followSessionEvents.current = true;
+      eventsAtSession.current = eventsRef.current;
+      sessionPinNow.current = true;
+      didLayout.current = false;
+    }
+    if (sessionPinNow.current && q !== "") return;
+    const endTop = endScrollTop({
       count: items.length,
       viewportHeight,
       rowHeight: DEFAULT_ROW_HEIGHT,
     });
-    setScroll((prev) => (prev.scrollTop === top ? prev : { ...prev, scrollTop: top }));
     const el = listRef.current;
+    const scrollTop = el ? el.scrollTop : 0;
+    const sessionFollow = followSessionEvents.current && events !== eventsAtSession.current;
+    const qCleared = prevQ.current !== "" && q === "";
+    const qChanged = prevQ.current !== q;
+    const countChanged = prevCount.current !== items.length;
+    const lastEndTop = prevEndTop.current;
+    prevQ.current = q;
+    prevCount.current = items.length;
+    prevEndTop.current = endTop;
+    let top = scrollTop;
+    if (sessionPinNow.current || sessionFollow) {
+      sessionPinNow.current = false;
+      followSessionEvents.current = false;
+      top = nextScrollTop({ reason: "session", scrollTop, endTop });
+    } else if (qCleared) {
+      top = nextScrollTop({ reason: "clear-q", scrollTop, endTop });
+    } else if (!didLayout.current) {
+      didLayout.current = true;
+      top = nextScrollTop({ reason: "layout", scrollTop, endTop });
+    } else if (qChanged) {
+      top = nextScrollTop({ reason: "query", scrollTop, endTop, prevEndTop: lastEndTop });
+    } else if (countChanged) {
+      top = nextScrollTop({ reason: "count", scrollTop, endTop, prevEndTop: lastEndTop });
+    }
+    setScroll((prev) => (prev.scrollTop === top ? prev : { ...prev, scrollTop: top }));
     if (el && el.scrollTop !== top) el.scrollTop = top;
-  }, [q, items.length, viewportHeight]);
+  }, [q, items.length, viewportHeight, sessionId, events]);
   const onScroll = useCallback((e: UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
     setScroll({ scrollTop: el.scrollTop, viewportHeight: el.clientHeight });

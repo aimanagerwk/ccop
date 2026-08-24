@@ -295,7 +295,7 @@ export default function Page() {
             />
           </>
         ) : null}
-        {current ? <Transcript events={events} /> : <div className="empty">选择一个会话</div>}
+        {current ? <Transcript events={events} sessionId={current.id} /> : <div className="empty">选择一个会话</div>}
         <Composer
           id={current ? sel.sessionId : null}
           serverId={sel.serverId}

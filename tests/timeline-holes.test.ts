@@ -619,12 +619,19 @@ describe("holes / security", () => {
     expect(win.end).toBeGreaterThan(win.start);
   });
 
-  it("Transcript pins search changes to endScrollTop", () => {
+  it("Transcript pins open switch and clear-q, not count or mid-query away from latest", () => {
     const src = readFileSync(new URL("../web/src/components/Transcript.tsx", import.meta.url), "utf8");
     expect(src).toMatch(/endScrollTop/);
     expect(src).toMatch(/el\.scrollTop/);
     expect(src).toMatch(/listRef/);
     expect(src).toMatch(/setScroll/);
+    expect(src).toMatch(/nextScrollTop/);
+    expect(src).toMatch(/setQ\(""\)/);
+    expect(src).toMatch(/reason:\s*["']session["']/);
+    expect(src).toMatch(/reason:\s*["']clear-q["']/);
+    expect(src).not.toMatch(
+      /useEffect\(\(\) => \{\s*const top = endScrollTop\([\s\S]*?\}, \[q, items\.length, viewportHeight\]\)/,
+    );
   });
 
   it("3MB tool output haystack is ~64k clipped prefix, not the raw blob", () => {

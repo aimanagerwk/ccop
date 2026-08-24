@@ -104,6 +104,52 @@ export function endScrollTop(p: {
   return Math.max(0, contentHeight - s.viewportHeight);
 }
 
+export type ScrollPinReason = "session" | "clear-q" | "layout" | "count" | "query";
+
+function ownString(obj: object, key: string): string | undefined {
+  if (!own(obj, key)) return undefined;
+  const v = (obj as Record<string, unknown>)[key];
+  return typeof v === "string" ? v : undefined;
+}
+
+function finiteOrZeroFloor(n: number | undefined): number {
+  return n !== undefined && Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+/** True when scrollTop is on the last page / 贴底. Hostile numbers are not near. */
+export function nearLatest(scrollTop: number, endTop: number): boolean {
+  if (!Number.isFinite(scrollTop) || !Number.isFinite(endTop)) return false;
+  if (scrollTop < 0 || endTop < 0) return false;
+  return scrollTop >= endTop;
+}
+
+/**
+ * Last-page pin policy. session / clear-q / layout always land on endTop.
+ * count / query only follow when already 贴底, or still on the previous last page.
+ */
+export function nextScrollTop(p: {
+  reason: ScrollPinReason;
+  scrollTop: number;
+  endTop: number;
+  prevEndTop?: number;
+}): number {
+  const obj = p && typeof p === "object" && !Array.isArray(p) ? p : {};
+  const reason = ownString(obj, "reason") ?? "";
+  const scrollTop = finiteOrZeroFloor(ownNumber(obj, "scrollTop"));
+  const endTop = finiteOrZeroFloor(ownNumber(obj, "endTop"));
+  const rawPrev = ownNumber(obj, "prevEndTop");
+  const prevEndTop =
+    rawPrev !== undefined && Number.isFinite(rawPrev) && rawPrev >= 0 ? rawPrev : undefined;
+
+  if (reason === "session" || reason === "clear-q" || reason === "layout") return endTop;
+  if (reason === "count" || reason === "query") {
+    const onThisPage = nearLatest(scrollTop, endTop);
+    const onPrevPage = prevEndTop !== undefined && nearLatest(scrollTop, prevEndTop);
+    return onThisPage || onPrevPage ? endTop : scrollTop;
+  }
+  return scrollTop;
+}
+
 export function virtualWindow(p: VirtualParams): VirtualWindow {
   const s = sanitizeVirtualParams(p);
   if (s.count === 0) {
