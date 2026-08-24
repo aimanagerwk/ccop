@@ -5,7 +5,7 @@ import type { ClassifiedEvent } from "../lib/protocol";
 import { clipToolText, foldTranscript, toolCardPresentation, type FoldedRow } from "../lib/fold-transcript";
 import { flattenTimeline, groupTurns, type TimelineItem } from "../lib/timeline-turn";
 import { filterGroups } from "../lib/timeline-filter";
-import { DEFAULT_ROW_HEIGHT, endScrollTop, nextScrollTop, virtualWindow, visibleSlice } from "../lib/timeline-virtual";
+import { DEFAULT_ROW_HEIGHT, endScrollTop, nearLatest, nextScrollTop, virtualWindow, visibleSlice } from "../lib/timeline-virtual";
 import { parseMdLite } from "../lib/md-lite";
 import { formatDateTimeAttr } from "../lib/format-ts";
 import { formatClock } from "../lib/workflow-monitor";
@@ -266,28 +266,30 @@ export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: strin
     prevCount.current = items.length;
     prevEndTop.current = endTop;
     prevViewport.current = measured;
-    let owed = pendingPin.current;
-    if (sessionPinNow.current || sessionFollow) owed = "session";
-    else if (qCleared) owed = "clear-q";
-    else if (!didLayout.current && owed == null) owed = "layout";
-    if (owed) pendingPin.current = owed;
+    if (sessionPinNow.current || sessionFollow) pendingPin.current = "session";
+    else if (qCleared) pendingPin.current = "clear-q";
+    else if (!didLayout.current && pendingPin.current == null) pendingPin.current = "layout";
+    const owed = pendingPin.current;
     let top = scrollTop;
-    if (pendingPin.current === "session") {
+    if (owed === "session") {
       top = nextScrollTop({ reason: "session", scrollTop, endTop });
-    } else if (pendingPin.current === "clear-q") {
+    } else if (owed === "clear-q") {
       top = nextScrollTop({ reason: "clear-q", scrollTop, endTop });
-    } else if (pendingPin.current === "layout") {
+    } else if (owed === "layout") {
       top = nextScrollTop({ reason: "layout", scrollTop, endTop });
     } else if (qChanged) {
       top = nextScrollTop({ reason: "query", scrollTop, endTop, prevEndTop: lastEndTop });
     } else if (countChanged || heightChanged) {
       top = nextScrollTop({ reason: "count", scrollTop, endTop, prevEndTop: lastEndTop });
     }
-    if (pendingPin.current && !heightChanged) {
-      pendingPin.current = null;
+    if (owed) {
       sessionPinNow.current = false;
       followSessionEvents.current = false;
       didLayout.current = true;
+      if (!heightChanged) pendingPin.current = null;
+    }
+    if (scrollTop > 0 && !nearLatest(scrollTop, endTop) && top === scrollTop) {
+      pendingPin.current = null;
     }
     setScroll((prev) =>
       prev.scrollTop === top && prev.viewportHeight === measured
@@ -304,6 +306,9 @@ export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: strin
   });
   const onScroll = useCallback((e: UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
+    if (pendingPin.current && el.scrollTop > 0 && !nearLatest(el.scrollTop, prevEndTop.current)) {
+      pendingPin.current = null;
+    }
     setScroll({ scrollTop: el.scrollTop, viewportHeight: el.clientHeight });
   }, []);
   const onListRef = useCallback((el: HTMLDivElement | null) => {

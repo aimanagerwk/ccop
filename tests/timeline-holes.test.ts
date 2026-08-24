@@ -638,6 +638,10 @@ describe("holes / security", () => {
     expect(src).toMatch(/viewportHeight:\s*measured/);
     expect(src).toMatch(/pendingPin/);
     expect(src).toMatch(/heightChanged/);
+    expect(src).toMatch(/reason:\s*["']session["']/);
+    expect(src).toMatch(/reason:\s*["']clear-q["']/);
+    expect(src).toMatch(/el\.scrollTop\s*>\s*0/);
+    expect(src).toMatch(/if\s*\(\s*!heightChanged\s*\)\s*pendingPin\.current\s*=\s*null/);
   });
 
   it("3MB tool output haystack is ~64k clipped prefix, not the raw blob", () => {

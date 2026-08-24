@@ -159,11 +159,15 @@ describe("timeline scroll policy", () => {
     const count = 80;
     const fake = endScrollTop({ count, viewportHeight: 800, rowHeight: DEFAULT_ROW_HEIGHT });
     const real = endScrollTop({ count, viewportHeight: 240, rowHeight: DEFAULT_ROW_HEIGHT });
+    expect(real).toBe(endScrollTop({ count, viewportHeight: 240, rowHeight: DEFAULT_ROW_HEIGHT }));
     expect(real).toBeGreaterThan(fake);
+    const spentFlags = { sessionPinNow: false, didLayout: true, scrollTop: 0 };
+    expect(spentFlags.sessionPinNow).toBe(false);
+    expect(spentFlags.didLayout).toBe(true);
     expect(
       nextScrollTop({
         reason: "count",
-        scrollTop: 0,
+        scrollTop: spentFlags.scrollTop,
         endTop: real,
         prevEndTop: fake,
       }),

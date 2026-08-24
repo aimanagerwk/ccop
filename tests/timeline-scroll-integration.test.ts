@@ -158,6 +158,9 @@ describe("timeline scroll wiring", () => {
     expect(tx).toMatch(/viewportHeight:\s*measured/);
     expect(tx).toMatch(/pendingPin/);
     expect(tx).toMatch(/heightChanged/);
+    expect(tx).toMatch(/reason:\s*["']session["']/);
+    expect(tx).toMatch(/reason:\s*["']clear-q["']/);
+    expect(tx).toMatch(/if\s*\(\s*!heightChanged\s*\)\s*pendingPin\.current\s*=\s*null/);
   });
 
   it("after a taller first pin, remasure to a shorter real window still lands the last item", () => {
@@ -230,6 +233,8 @@ describe("timeline scroll wiring", () => {
     expect(tx).toMatch(/pendingPin/);
     expect(tx).toMatch(/heightChanged/);
     expect(tx).toMatch(/if\s*\(\s*measured\s*<=\s*0\s*\)\s*return/);
+    expect(tx).toMatch(/if\s*\(\s*!heightChanged\s*\)\s*pendingPin\.current\s*=\s*null/);
+    expect(tx).toMatch(/el\.scrollTop\s*>\s*0/);
     expect(tx).not.toMatch(/:\s*800\b/);
   });
 

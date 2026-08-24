@@ -26,6 +26,10 @@ describe("timeline scroll security", () => {
     expect(tx).toMatch(/viewportHeight:\s*measured/);
     expect(tx).toMatch(/pendingPin/);
     expect(tx).toMatch(/heightChanged/);
+    expect(tx).toMatch(/reason:\s*["']session["']/);
+    expect(tx).toMatch(/reason:\s*["']clear-q["']/);
+    expect(tx).toMatch(/el\.scrollTop\s*>\s*0/);
+    expect(tx).toMatch(/if\s*\(\s*!heightChanged\s*\)\s*pendingPin\.current\s*=\s*null/);
     expect(tx).toMatch(/setQ\(""\)/);
     expect(DEFAULT_ROW_HEIGHT).toBe(72);
   });
