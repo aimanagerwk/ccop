@@ -24,6 +24,7 @@ describe("timeline scroll security", () => {
     expect(tx).toMatch(/clientHeight/);
     expect(tx).toMatch(/if\s*\(\s*measured\s*<=\s*0\s*\)\s*return/);
     expect(tx).toMatch(/viewportHeight:\s*measured/);
+    expect(tx).toMatch(/heightChanged/);
     expect(tx).toMatch(/setQ\(""\)/);
     expect(DEFAULT_ROW_HEIGHT).toBe(72);
   });

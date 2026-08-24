@@ -208,6 +208,7 @@ export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: strin
   const prevQ = useRef(q);
   const prevCount = useRef(0);
   const prevEndTop = useRef(0);
+  const prevViewport = useRef(0);
   const didLayout = useRef(false);
   const prevSessionId = useRef(sessionId);
   const items = useMemo(() => {
@@ -256,10 +257,12 @@ export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: strin
     const qCleared = prevQ.current !== "" && q === "";
     const qChanged = prevQ.current !== q;
     const countChanged = prevCount.current !== items.length;
+    const heightChanged = prevViewport.current !== measured;
     const lastEndTop = prevEndTop.current;
     prevQ.current = q;
     prevCount.current = items.length;
     prevEndTop.current = endTop;
+    prevViewport.current = measured;
     let top = scrollTop;
     if (sessionPinNow.current || sessionFollow) {
       sessionPinNow.current = false;
@@ -272,7 +275,7 @@ export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: strin
       top = nextScrollTop({ reason: "layout", scrollTop, endTop });
     } else if (qChanged) {
       top = nextScrollTop({ reason: "query", scrollTop, endTop, prevEndTop: lastEndTop });
-    } else if (countChanged) {
+    } else if (countChanged || heightChanged) {
       top = nextScrollTop({ reason: "count", scrollTop, endTop, prevEndTop: lastEndTop });
     }
     setScroll((prev) =>

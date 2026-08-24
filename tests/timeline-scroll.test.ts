@@ -127,6 +127,34 @@ describe("timeline scroll policy", () => {
     ).toBe(left);
   });
 
+  it("a shorter remasure after a tall first pin still lands true bottom", () => {
+    const count = 80;
+    const fake = endScrollTop({ count, viewportHeight: 800, rowHeight: DEFAULT_ROW_HEIGHT });
+    const real = endScrollTop({ count, viewportHeight: 240, rowHeight: DEFAULT_ROW_HEIGHT });
+    expect(real).toBeGreaterThan(fake);
+    const first = nextScrollTop({ reason: "session", scrollTop: 0, endTop: fake });
+    expect(first).toBe(fake);
+    expect(
+      nextScrollTop({
+        reason: "count",
+        scrollTop: first,
+        endTop: real,
+        prevEndTop: fake,
+      }),
+    ).toBe(real);
+    expect(nextScrollTop({ reason: "clear-q", scrollTop: fake, endTop: real })).toBe(real);
+    expect(nextScrollTop({ reason: "layout", scrollTop: fake, endTop: real })).toBe(real);
+    const left = 144;
+    expect(
+      nextScrollTop({
+        reason: "count",
+        scrollTop: left,
+        endTop: real,
+        prevEndTop: fake,
+      }),
+    ).toBe(left);
+  });
+
   it("a new row after leaving the previous last page keeps scrollTop", () => {
     const viewportHeight = 400;
     const endBefore = endScrollTop({ count: 80, viewportHeight, rowHeight: DEFAULT_ROW_HEIGHT });

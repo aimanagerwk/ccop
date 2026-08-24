@@ -156,6 +156,57 @@ describe("timeline scroll wiring", () => {
     expect(tx).toMatch(/clientHeight/);
     expect(tx).toMatch(/if\s*\(\s*measured\s*<=\s*0\s*\)\s*return/);
     expect(tx).toMatch(/viewportHeight:\s*measured/);
+    expect(tx).toMatch(/heightChanged/);
+  });
+
+  it("after a taller first pin, remasure to a shorter real window still lands the last item", () => {
+    const events = [];
+    for (let i = 0; i < 40; i++) {
+      events.push(classify.fromSent({ text: `keep-${i}` })[0]);
+      events.push(...classify.fromResult({ is_error: false, result: `reply ${i}` }));
+    }
+    const items = flattenTimeline(filterGroups(groupTurns(foldTranscript(events)), { q: "" }));
+    const last = items[items.length - 1];
+    const fake = endScrollTop({
+      count: items.length,
+      viewportHeight: 800,
+      rowHeight: DEFAULT_ROW_HEIGHT,
+    });
+    const real = endScrollTop({
+      count: items.length,
+      viewportHeight: 240,
+      rowHeight: DEFAULT_ROW_HEIGHT,
+    });
+    const first = nextScrollTop({ reason: "session", scrollTop: 0, endTop: fake });
+    expect(first).toBe(fake);
+    const remasured = nextScrollTop({
+      reason: "count",
+      scrollTop: first,
+      endTop: real,
+      prevEndTop: fake,
+    });
+    expect(remasured).toBe(real);
+    const realWin = virtualWindow({
+      scrollTop: remasured,
+      viewportHeight: 240,
+      rowHeight: DEFAULT_ROW_HEIGHT,
+      count: items.length,
+      overscan: 0,
+    });
+    expect(visibleSlice(items, realWin)).toContain(last);
+    const left = 144;
+    expect(
+      nextScrollTop({
+        reason: "count",
+        scrollTop: left,
+        endTop: real,
+        prevEndTop: fake,
+      }),
+    ).toBe(left);
+    const tx = readWeb("components/Transcript.tsx");
+    expect(tx).toMatch(/heightChanged/);
+    expect(tx).toMatch(/if\s*\(\s*measured\s*<=\s*0\s*\)\s*return/);
+    expect(tx).not.toMatch(/:\s*800\b/);
   });
 
   it("row height used by Transcript and CSS stays 72", () => {
