@@ -157,10 +157,14 @@ describe("timeline scroll wiring", () => {
     expect(tx).toMatch(/if\s*\(\s*measured\s*<=\s*0\s*\)\s*return/);
     expect(tx).toMatch(/viewportHeight:\s*measured/);
     expect(tx).toMatch(/pendingPin/);
+    expect(tx).toMatch(/pendingPin\.current = "session"/);
+    expect(tx).toMatch(/pendingPin\.current = "clear-q"/);
+    expect(tx).toMatch(/pendingPin\.current = "layout"/);
     expect(tx).toMatch(/heightChanged/);
     expect(tx).toMatch(/reason:\s*["']session["']/);
     expect(tx).toMatch(/reason:\s*["']clear-q["']/);
-    expect(tx).toMatch(/if\s*\(\s*!heightChanged\s*\)\s*pendingPin\.current\s*=\s*null/);
+    expect(tx).not.toMatch(/if\s*\(\s*!heightChanged\s*\)\s*pendingPin\.current\s*=\s*null/);
+    expect(tx).toMatch(/top === scrollTop/);
   });
 
   it("after a taller first pin, remasure to a shorter real window still lands the last item", () => {
@@ -181,10 +185,11 @@ describe("timeline scroll wiring", () => {
       viewportHeight: 240,
       rowHeight: DEFAULT_ROW_HEIGHT,
     });
-    const first = nextScrollTop({ reason: "session", scrollTop: 0, endTop: fake });
+    let pending: "session" | "clear-q" | "layout" | null = "session";
+    const first = nextScrollTop({ reason: pending, scrollTop: 0, endTop: fake });
     expect(first).toBe(fake);
     const remasured = nextScrollTop({
-      reason: "count",
+      reason: pending,
       scrollTop: first,
       endTop: real,
       prevEndTop: fake,
@@ -207,7 +212,10 @@ describe("timeline scroll wiring", () => {
         prevEndTop: fake,
       }),
     ).toBe(left);
-    const fromZero = nextScrollTop({ reason: "session", scrollTop: 0, endTop: real });
+    const spentFlags = { sessionPinNow: false, didLayout: true, scrollTop: 0 };
+    expect(spentFlags.sessionPinNow).toBe(false);
+    expect(spentFlags.didLayout).toBe(true);
+    const fromZero = nextScrollTop({ reason: pending, scrollTop: spentFlags.scrollTop, endTop: real });
     expect(fromZero).toBe(real);
     expect(
       visibleSlice(
@@ -233,8 +241,9 @@ describe("timeline scroll wiring", () => {
     expect(tx).toMatch(/pendingPin/);
     expect(tx).toMatch(/heightChanged/);
     expect(tx).toMatch(/if\s*\(\s*measured\s*<=\s*0\s*\)\s*return/);
-    expect(tx).toMatch(/if\s*\(\s*!heightChanged\s*\)\s*pendingPin\.current\s*=\s*null/);
+    expect(tx).not.toMatch(/if\s*\(\s*!heightChanged\s*\)\s*pendingPin\.current\s*=\s*null/);
     expect(tx).toMatch(/el\.scrollTop\s*>\s*0/);
+    expect(tx).toMatch(/top === scrollTop/);
     expect(tx).not.toMatch(/:\s*800\b/);
   });
 

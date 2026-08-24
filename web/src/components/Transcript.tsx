@@ -286,7 +286,6 @@ export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: strin
       sessionPinNow.current = false;
       followSessionEvents.current = false;
       didLayout.current = true;
-      if (!heightChanged) pendingPin.current = null;
     }
     if (scrollTop > 0 && !nearLatest(scrollTop, endTop) && top === scrollTop) {
       pendingPin.current = null;

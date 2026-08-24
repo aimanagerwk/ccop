@@ -132,11 +132,13 @@ describe("timeline scroll policy", () => {
     const fake = endScrollTop({ count, viewportHeight: 800, rowHeight: DEFAULT_ROW_HEIGHT });
     const real = endScrollTop({ count, viewportHeight: 240, rowHeight: DEFAULT_ROW_HEIGHT });
     expect(real).toBeGreaterThan(fake);
-    const first = nextScrollTop({ reason: "session", scrollTop: 0, endTop: fake });
+    let pending: "session" | "clear-q" | "layout" | null = "session";
+    const first = nextScrollTop({ reason: pending, scrollTop: 0, endTop: fake });
     expect(first).toBe(fake);
+    expect(pending).toBe("session");
     expect(
       nextScrollTop({
-        reason: "count",
+        reason: pending,
         scrollTop: first,
         endTop: real,
         prevEndTop: fake,
@@ -155,7 +157,7 @@ describe("timeline scroll policy", () => {
     ).toBe(left);
   });
 
-  it("a remasure from scrollTop 0 still lands true bottom when the pin is still owed", () => {
+  it("after force-pin flags are spent at scrollTop 0, a later real 240 pin is still owed", () => {
     const count = 80;
     const fake = endScrollTop({ count, viewportHeight: 800, rowHeight: DEFAULT_ROW_HEIGHT });
     const real = endScrollTop({ count, viewportHeight: 240, rowHeight: DEFAULT_ROW_HEIGHT });
@@ -175,6 +177,9 @@ describe("timeline scroll policy", () => {
     expect(nextScrollTop({ reason: "session", scrollTop: 0, endTop: real })).toBe(real);
     expect(nextScrollTop({ reason: "clear-q", scrollTop: 0, endTop: real })).toBe(real);
     expect(nextScrollTop({ reason: "layout", scrollTop: 0, endTop: real })).toBe(real);
+    const mid = 144;
+    expect(nextScrollTop({ reason: "session", scrollTop: mid, endTop: real })).toBe(real);
+    expect(nextScrollTop({ reason: "clear-q", scrollTop: mid, endTop: real })).toBe(real);
   });
 
   it("a new row after leaving the previous last page keeps scrollTop", () => {

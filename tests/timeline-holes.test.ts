@@ -637,11 +637,16 @@ describe("holes / security", () => {
     expect(src).toMatch(/if\s*\(\s*measured\s*<=\s*0\s*\)\s*return/);
     expect(src).toMatch(/viewportHeight:\s*measured/);
     expect(src).toMatch(/pendingPin/);
+    expect(src).toMatch(/pendingPin\.current = "session"/);
+    expect(src).toMatch(/pendingPin\.current = "clear-q"/);
+    expect(src).toMatch(/pendingPin\.current = "layout"/);
     expect(src).toMatch(/heightChanged/);
     expect(src).toMatch(/reason:\s*["']session["']/);
     expect(src).toMatch(/reason:\s*["']clear-q["']/);
     expect(src).toMatch(/el\.scrollTop\s*>\s*0/);
-    expect(src).toMatch(/if\s*\(\s*!heightChanged\s*\)\s*pendingPin\.current\s*=\s*null/);
+    expect(src).not.toMatch(/:\s*800\b/);
+    expect(src).not.toMatch(/if\s*\(\s*!heightChanged\s*\)\s*pendingPin\.current\s*=\s*null/);
+    expect(src).toMatch(/top === scrollTop/);
   });
 
   it("3MB tool output haystack is ~64k clipped prefix, not the raw blob", () => {
