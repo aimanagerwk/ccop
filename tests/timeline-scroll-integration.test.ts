@@ -154,6 +154,8 @@ describe("timeline scroll wiring", () => {
     const tx = readWeb("components/Transcript.tsx");
     expect(tx).not.toMatch(/viewportHeight\s*>\s*0\s*\?\s*scroll\.viewportHeight\s*:\s*800/);
     expect(tx).toMatch(/clientHeight/);
+    expect(tx).toMatch(/if\s*\(\s*measured\s*<=\s*0\s*\)\s*return/);
+    expect(tx).toMatch(/viewportHeight:\s*measured/);
   });
 
   it("row height used by Transcript and CSS stays 72", () => {

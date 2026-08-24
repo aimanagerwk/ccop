@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from "react";
 import type { ClassifiedEvent } from "../lib/protocol";
 import { clipToolText, foldTranscript, toolCardPresentation, type FoldedRow } from "../lib/fold-transcript";
 import { flattenTimeline, groupTurns, type TimelineItem } from "../lib/timeline-turn";
@@ -275,9 +275,19 @@ export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: strin
     } else if (countChanged) {
       top = nextScrollTop({ reason: "count", scrollTop, endTop, prevEndTop: lastEndTop });
     }
-    setScroll((prev) => (prev.scrollTop === top ? prev : { ...prev, scrollTop: top }));
-    if (el && el.scrollTop !== top) el.scrollTop = top;
+    setScroll((prev) =>
+      prev.scrollTop === top && prev.viewportHeight === measured
+        ? prev
+        : { scrollTop: top, viewportHeight: measured },
+    );
+    if (el.scrollTop !== top) el.scrollTop = top;
   }, [q, items.length, viewportHeight, sessionId, events]);
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const h = el.clientHeight;
+    setScroll((prev) => (prev.viewportHeight === h ? prev : { ...prev, viewportHeight: h }));
+  });
   const onScroll = useCallback((e: UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
     setScroll({ scrollTop: el.scrollTop, viewportHeight: el.clientHeight });
