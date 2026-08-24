@@ -205,6 +205,7 @@ export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: strin
   const followSessionEvents = useRef(true);
   const eventsAtSession = useRef(events);
   const sessionPinNow = useRef(true);
+  const pendingPin = useRef<"session" | "clear-q" | "layout" | null>("session");
   const prevQ = useRef(q);
   const prevCount = useRef(0);
   const prevEndTop = useRef(0);
@@ -232,6 +233,7 @@ export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: strin
     followSessionEvents.current = true;
     eventsAtSession.current = eventsRef.current;
     sessionPinNow.current = true;
+    pendingPin.current = "session";
     didLayout.current = false;
   }, [sessionId]);
   useEffect(() => {
@@ -241,6 +243,7 @@ export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: strin
       followSessionEvents.current = true;
       eventsAtSession.current = eventsRef.current;
       sessionPinNow.current = true;
+      pendingPin.current = "session";
       didLayout.current = false;
     }
     if (sessionPinNow.current && q !== "") return;
@@ -263,20 +266,28 @@ export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: strin
     prevCount.current = items.length;
     prevEndTop.current = endTop;
     prevViewport.current = measured;
+    let owed = pendingPin.current;
+    if (sessionPinNow.current || sessionFollow) owed = "session";
+    else if (qCleared) owed = "clear-q";
+    else if (!didLayout.current && owed == null) owed = "layout";
+    if (owed) pendingPin.current = owed;
     let top = scrollTop;
-    if (sessionPinNow.current || sessionFollow) {
-      sessionPinNow.current = false;
-      followSessionEvents.current = false;
+    if (pendingPin.current === "session") {
       top = nextScrollTop({ reason: "session", scrollTop, endTop });
-    } else if (qCleared) {
+    } else if (pendingPin.current === "clear-q") {
       top = nextScrollTop({ reason: "clear-q", scrollTop, endTop });
-    } else if (!didLayout.current) {
-      didLayout.current = true;
+    } else if (pendingPin.current === "layout") {
       top = nextScrollTop({ reason: "layout", scrollTop, endTop });
     } else if (qChanged) {
       top = nextScrollTop({ reason: "query", scrollTop, endTop, prevEndTop: lastEndTop });
     } else if (countChanged || heightChanged) {
       top = nextScrollTop({ reason: "count", scrollTop, endTop, prevEndTop: lastEndTop });
+    }
+    if (pendingPin.current && !heightChanged) {
+      pendingPin.current = null;
+      sessionPinNow.current = false;
+      followSessionEvents.current = false;
+      didLayout.current = true;
     }
     setScroll((prev) =>
       prev.scrollTop === top && prev.viewportHeight === measured

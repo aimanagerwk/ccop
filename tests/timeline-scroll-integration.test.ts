@@ -156,6 +156,7 @@ describe("timeline scroll wiring", () => {
     expect(tx).toMatch(/clientHeight/);
     expect(tx).toMatch(/if\s*\(\s*measured\s*<=\s*0\s*\)\s*return/);
     expect(tx).toMatch(/viewportHeight:\s*measured/);
+    expect(tx).toMatch(/pendingPin/);
     expect(tx).toMatch(/heightChanged/);
   });
 
@@ -203,7 +204,30 @@ describe("timeline scroll wiring", () => {
         prevEndTop: fake,
       }),
     ).toBe(left);
+    const fromZero = nextScrollTop({ reason: "session", scrollTop: 0, endTop: real });
+    expect(fromZero).toBe(real);
+    expect(
+      visibleSlice(
+        items,
+        virtualWindow({
+          scrollTop: fromZero,
+          viewportHeight: 240,
+          rowHeight: DEFAULT_ROW_HEIGHT,
+          count: items.length,
+          overscan: 0,
+        }),
+      ),
+    ).toContain(last);
+    expect(
+      nextScrollTop({
+        reason: "count",
+        scrollTop: 0,
+        endTop: real,
+        prevEndTop: fake,
+      }),
+    ).toBe(0);
     const tx = readWeb("components/Transcript.tsx");
+    expect(tx).toMatch(/pendingPin/);
     expect(tx).toMatch(/heightChanged/);
     expect(tx).toMatch(/if\s*\(\s*measured\s*<=\s*0\s*\)\s*return/);
     expect(tx).not.toMatch(/:\s*800\b/);

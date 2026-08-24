@@ -636,6 +636,7 @@ describe("holes / security", () => {
     expect(src).toMatch(/clientHeight/);
     expect(src).toMatch(/if\s*\(\s*measured\s*<=\s*0\s*\)\s*return/);
     expect(src).toMatch(/viewportHeight:\s*measured/);
+    expect(src).toMatch(/pendingPin/);
     expect(src).toMatch(/heightChanged/);
   });
 
