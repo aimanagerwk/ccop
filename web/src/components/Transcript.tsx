@@ -214,7 +214,7 @@ export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: strin
     const rows = foldTranscript(events);
     return flattenTimeline(filterGroups(groupTurns(rows), { q }));
   }, [events, q]);
-  const viewportHeight = scroll.viewportHeight > 0 ? scroll.viewportHeight : 800;
+  const viewportHeight = scroll.viewportHeight;
   const win = useMemo(
     () =>
       virtualWindow({
@@ -243,13 +243,15 @@ export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: strin
       didLayout.current = false;
     }
     if (sessionPinNow.current && q !== "") return;
+    const el = listRef.current;
+    const measured = el && el.clientHeight > 0 ? el.clientHeight : 0;
+    if (measured <= 0) return;
     const endTop = endScrollTop({
       count: items.length,
-      viewportHeight,
+      viewportHeight: measured,
       rowHeight: DEFAULT_ROW_HEIGHT,
     });
-    const el = listRef.current;
-    const scrollTop = el ? el.scrollTop : 0;
+    const scrollTop = el.scrollTop;
     const sessionFollow = followSessionEvents.current && events !== eventsAtSession.current;
     const qCleared = prevQ.current !== "" && q === "";
     const qChanged = prevQ.current !== q;

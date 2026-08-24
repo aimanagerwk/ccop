@@ -112,6 +112,50 @@ describe("timeline scroll wiring", () => {
     ).toBe(mid);
   });
 
+  it("a shorter real viewport still lands the last item; default-800 pin leaves it below", () => {
+    const events = [];
+    for (let i = 0; i < 40; i++) {
+      events.push(classify.fromSent({ text: `keep-${i}` })[0]);
+      events.push(...classify.fromResult({ is_error: false, result: `reply ${i}` }));
+    }
+    const items = flattenTimeline(filterGroups(groupTurns(foldTranscript(events)), { q: "" }));
+    const last = items[items.length - 1];
+    const fake = endScrollTop({
+      count: items.length,
+      viewportHeight: 800,
+      rowHeight: DEFAULT_ROW_HEIGHT,
+    });
+    const real = endScrollTop({
+      count: items.length,
+      viewportHeight: 240,
+      rowHeight: DEFAULT_ROW_HEIGHT,
+    });
+    expect(real).toBeGreaterThan(fake);
+    const fakeWin = virtualWindow({
+      scrollTop: fake,
+      viewportHeight: 240,
+      rowHeight: DEFAULT_ROW_HEIGHT,
+      count: items.length,
+      overscan: 0,
+    });
+    expect(visibleSlice(items, fakeWin)).not.toContain(last);
+    const pinned = nextScrollTop({ reason: "session", scrollTop: 0, endTop: real });
+    expect(pinned).toBe(real);
+    const realWin = virtualWindow({
+      scrollTop: pinned,
+      viewportHeight: 240,
+      rowHeight: DEFAULT_ROW_HEIGHT,
+      count: items.length,
+      overscan: 0,
+    });
+    expect(visibleSlice(items, realWin)).toContain(last);
+    const cleared = nextScrollTop({ reason: "clear-q", scrollTop: fake, endTop: real });
+    expect(cleared).toBe(real);
+    const tx = readWeb("components/Transcript.tsx");
+    expect(tx).not.toMatch(/viewportHeight\s*>\s*0\s*\?\s*scroll\.viewportHeight\s*:\s*800/);
+    expect(tx).toMatch(/clientHeight/);
+  });
+
   it("row height used by Transcript and CSS stays 72", () => {
     expect(DEFAULT_ROW_HEIGHT).toBe(72);
     const tx = readWeb("components/Transcript.tsx");

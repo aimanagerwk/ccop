@@ -17,6 +17,15 @@ afterEach(() => {
 });
 
 describe("timeline scroll security", () => {
+  it("Transcript does not pin open/switch/clear-q with a high default viewport height", () => {
+    const tx = readFileSync(new URL("../web/src/components/Transcript.tsx", import.meta.url), "utf8");
+    expect(tx).not.toMatch(/viewportHeight\s*>\s*0\s*\?\s*scroll\.viewportHeight\s*:\s*800/);
+    expect(tx).not.toMatch(/:\s*800\b/);
+    expect(tx).toMatch(/clientHeight/);
+    expect(tx).toMatch(/setQ\(""\)/);
+    expect(DEFAULT_ROW_HEIGHT).toBe(72);
+  });
+
   it("DEFAULT_ROW_HEIGHT and the virt CSS stay 72", () => {
     expect(DEFAULT_ROW_HEIGHT).toBe(72);
     const css = readFileSync(new URL("../web/src/app/globals.css", import.meta.url), "utf8");

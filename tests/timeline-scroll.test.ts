@@ -108,6 +108,25 @@ describe("timeline scroll policy", () => {
     ).toBe(endTop - DEFAULT_ROW_HEIGHT);
   });
 
+  it("pin height for a short real viewport is higher than the default-800 fake bottom", () => {
+    const count = 80;
+    const fake = endScrollTop({ count, viewportHeight: 800, rowHeight: DEFAULT_ROW_HEIGHT });
+    const real = endScrollTop({ count, viewportHeight: 240, rowHeight: DEFAULT_ROW_HEIGHT });
+    expect(real).toBeGreaterThan(fake);
+    expect(nextScrollTop({ reason: "session", scrollTop: 0, endTop: real })).toBe(real);
+    expect(nextScrollTop({ reason: "clear-q", scrollTop: fake, endTop: real })).toBe(real);
+    expect(nextScrollTop({ reason: "layout", scrollTop: fake, endTop: real })).toBe(real);
+    const left = 144;
+    expect(
+      nextScrollTop({
+        reason: "count",
+        scrollTop: left,
+        endTop: real,
+        prevEndTop: fake,
+      }),
+    ).toBe(left);
+  });
+
   it("a new row after leaving the previous last page keeps scrollTop", () => {
     const viewportHeight = 400;
     const endBefore = endScrollTop({ count: 80, viewportHeight, rowHeight: DEFAULT_ROW_HEIGHT });

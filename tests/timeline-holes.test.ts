@@ -632,6 +632,8 @@ describe("holes / security", () => {
     expect(src).not.toMatch(
       /useEffect\(\(\) => \{\s*const top = endScrollTop\([\s\S]*?\}, \[q, items\.length, viewportHeight\]\)/,
     );
+    expect(src).not.toMatch(/viewportHeight\s*>\s*0\s*\?\s*scroll\.viewportHeight\s*:\s*800/);
+    expect(src).toMatch(/clientHeight/);
   });
 
   it("3MB tool output haystack is ~64k clipped prefix, not the raw blob", () => {
