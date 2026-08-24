@@ -3,6 +3,7 @@ import * as virt from "../web/src/lib/timeline-virtual.js";
 import {
   DEFAULT_ROW_HEIGHT,
   endScrollTop,
+  measuredEndTop,
   nearLatest,
   nextScrollTop,
 } from "../web/src/lib/timeline-virtual.js";
@@ -11,6 +12,53 @@ describe("timeline scroll policy", () => {
   it("DEFAULT_ROW_HEIGHT stays 72", () => {
     expect(DEFAULT_ROW_HEIGHT).toBe(72);
     expect(virt.DEFAULT_ROW_HEIGHT).toBe(72);
+  });
+
+  it("measuredEndTop is the real scroll bottom and does not use a 72-row estimate", () => {
+    expect(typeof measuredEndTop).toBe("function");
+    expect(typeof virt.measuredEndTop).toBe("function");
+    const real = measuredEndTop({ scrollHeight: 8000, clientHeight: 240 });
+    const fake = endScrollTop({ count: 80, viewportHeight: 240, rowHeight: DEFAULT_ROW_HEIGHT });
+    expect(real).toBe(7760);
+    expect(real).toBeGreaterThan(fake);
+    expect(nextScrollTop({ reason: "session", scrollTop: 0, endTop: real })).toBe(real);
+    expect(nextScrollTop({ reason: "clear-q", scrollTop: 0, endTop: real })).toBe(real);
+    expect(nextScrollTop({ reason: "layout", scrollTop: fake, endTop: real })).toBe(real);
+    expect(measuredEndTop({ scrollHeight: Number.NaN, clientHeight: 240 })).toBe(0);
+    expect(measuredEndTop({ scrollHeight: 8000, clientHeight: 0 })).toBe(0);
+  });
+
+  it("changing search from the top does not drag to the new bottom", () => {
+    const endTop = measuredEndTop({ scrollHeight: 8000, clientHeight: 240 });
+    expect(nearLatest(0, endTop)).toBe(false);
+    expect(
+      nextScrollTop({
+        reason: "query",
+        scrollTop: 0,
+        endTop,
+        prevEndTop: endTop,
+      }),
+    ).toBe(0);
+    expect(
+      nextScrollTop({
+        reason: "count",
+        scrollTop: 0,
+        endTop,
+        prevEndTop: endTop,
+      }),
+    ).toBe(0);
+  });
+
+  it("leftover session pending at the top does not apply to a later search", () => {
+    const endTop = measuredEndTop({ scrollHeight: 8000, clientHeight: 240 });
+    let pending: "session" | "clear-q" | "layout" | null = "session";
+    const qChanged = true;
+    const leftLatest = !nearLatest(0, endTop);
+    if (pending && qChanged && leftLatest) pending = null;
+    const reason = pending ?? "query";
+    expect(reason).toBe("query");
+    expect(nextScrollTop({ reason: "session", scrollTop: 0, endTop })).toBe(endTop);
+    expect(nextScrollTop({ reason, scrollTop: 0, endTop, prevEndTop: endTop })).toBe(0);
   });
 
   it("nearLatest is true only when 贴底 / already on the last page", () => {

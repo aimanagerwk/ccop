@@ -5,7 +5,7 @@ import type { ClassifiedEvent } from "../lib/protocol";
 import { clipToolText, foldTranscript, toolCardPresentation, type FoldedRow } from "../lib/fold-transcript";
 import { flattenTimeline, groupTurns, type TimelineItem } from "../lib/timeline-turn";
 import { filterGroups } from "../lib/timeline-filter";
-import { DEFAULT_ROW_HEIGHT, endScrollTop, nearLatest, nextScrollTop, virtualWindow, visibleSlice } from "../lib/timeline-virtual";
+import { DEFAULT_ROW_HEIGHT, measuredEndTop, nearLatest, nextScrollTop, virtualWindow, visibleSlice } from "../lib/timeline-virtual";
 import { parseMdLite } from "../lib/md-lite";
 import { formatDateTimeAttr } from "../lib/format-ts";
 import { formatClock } from "../lib/workflow-monitor";
@@ -198,7 +198,7 @@ function renderItem(item: TimelineItem, i: number) {
 export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: string }) {
   const { events, sessionId } = props;
   const [q, setQ] = useState("");
-  const [scroll, setScroll] = useState({ scrollTop: 0, viewportHeight: 0 });
+  const [scroll, setScroll] = useState({ scrollTop: 0, viewportHeight: 0, contentHeight: 0 });
   const listRef = useRef<HTMLDivElement | null>(null);
   const eventsRef = useRef(events);
   eventsRef.current = events;
@@ -210,6 +210,7 @@ export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: strin
   const prevCount = useRef(0);
   const prevEndTop = useRef(0);
   const prevViewport = useRef(0);
+  const prevContent = useRef(0);
   const didLayout = useRef(false);
   const prevSessionId = useRef(sessionId);
   const items = useMemo(() => {
@@ -250,10 +251,11 @@ export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: strin
     const el = listRef.current;
     const measured = el && el.clientHeight > 0 ? el.clientHeight : 0;
     if (measured <= 0) return;
-    const endTop = endScrollTop({
-      count: items.length,
-      viewportHeight: measured,
-      rowHeight: DEFAULT_ROW_HEIGHT,
+    const contentHeight = el.scrollHeight;
+    if (items.length > 0 && contentHeight <= 0) return;
+    const endTop = measuredEndTop({
+      scrollHeight: contentHeight,
+      clientHeight: measured,
     });
     const scrollTop = el.scrollTop;
     const sessionFollow = followSessionEvents.current && events !== eventsAtSession.current;
@@ -261,14 +263,24 @@ export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: strin
     const qChanged = prevQ.current !== q;
     const countChanged = prevCount.current !== items.length;
     const heightChanged = prevViewport.current !== measured;
+    const contentChanged = prevContent.current !== contentHeight;
     const lastEndTop = prevEndTop.current;
     prevQ.current = q;
     prevCount.current = items.length;
     prevEndTop.current = endTop;
     prevViewport.current = measured;
+    prevContent.current = contentHeight;
     if (sessionPinNow.current || sessionFollow) pendingPin.current = "session";
     else if (qCleared) pendingPin.current = "clear-q";
     else if (!didLayout.current && pendingPin.current == null) pendingPin.current = "layout";
+    else if (
+      pendingPin.current &&
+      (qChanged || countChanged) &&
+      !nearLatest(scrollTop, lastEndTop) &&
+      !nearLatest(scrollTop, endTop)
+    ) {
+      pendingPin.current = null;
+    }
     const owed = pendingPin.current;
     let top = scrollTop;
     if (owed === "session") {
@@ -279,7 +291,7 @@ export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: strin
       top = nextScrollTop({ reason: "layout", scrollTop, endTop });
     } else if (qChanged) {
       top = nextScrollTop({ reason: "query", scrollTop, endTop, prevEndTop: lastEndTop });
-    } else if (countChanged || heightChanged) {
+    } else if (countChanged || heightChanged || contentChanged) {
       top = nextScrollTop({ reason: "count", scrollTop, endTop, prevEndTop: lastEndTop });
     }
     if (owed) {
@@ -287,35 +299,44 @@ export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: strin
       followSessionEvents.current = false;
       didLayout.current = true;
     }
-    if (scrollTop > 0 && !nearLatest(scrollTop, endTop) && top === scrollTop) {
+    if (top === scrollTop && !nearLatest(scrollTop, lastEndTop) && !nearLatest(scrollTop, endTop)) {
       pendingPin.current = null;
     }
     setScroll((prev) =>
-      prev.scrollTop === top && prev.viewportHeight === measured
+      prev.scrollTop === top && prev.viewportHeight === measured && prev.contentHeight === contentHeight
         ? prev
-        : { scrollTop: top, viewportHeight: measured },
+        : { scrollTop: top, viewportHeight: measured, contentHeight },
     );
     if (el.scrollTop !== top) el.scrollTop = top;
-  }, [q, items.length, viewportHeight, sessionId, events]);
+  }, [q, items.length, viewportHeight, scroll.contentHeight, sessionId, events]);
   useLayoutEffect(() => {
     const el = listRef.current;
     if (!el) return;
     const h = el.clientHeight;
-    setScroll((prev) => (prev.viewportHeight === h ? prev : { ...prev, viewportHeight: h }));
+    const c = el.scrollHeight;
+    setScroll((prev) =>
+      prev.viewportHeight === h && prev.contentHeight === c ? prev : { ...prev, viewportHeight: h, contentHeight: c },
+    );
   });
   const onScroll = useCallback((e: UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
     if (pendingPin.current && el.scrollTop > 0 && !nearLatest(el.scrollTop, prevEndTop.current)) {
       pendingPin.current = null;
     }
-    setScroll({ scrollTop: el.scrollTop, viewportHeight: el.clientHeight });
+    setScroll({ scrollTop: el.scrollTop, viewportHeight: el.clientHeight, contentHeight: el.scrollHeight });
   }, []);
   const onListRef = useCallback((el: HTMLDivElement | null) => {
     listRef.current = el;
     if (!el) return;
     setScroll((prev) => {
-      if (prev.viewportHeight === el.clientHeight && prev.scrollTop === el.scrollTop) return prev;
-      return { scrollTop: el.scrollTop, viewportHeight: el.clientHeight };
+      if (
+        prev.viewportHeight === el.clientHeight &&
+        prev.scrollTop === el.scrollTop &&
+        prev.contentHeight === el.scrollHeight
+      ) {
+        return prev;
+      }
+      return { scrollTop: el.scrollTop, viewportHeight: el.clientHeight, contentHeight: el.scrollHeight };
     });
   }, []);
   if (!props.events.length) {

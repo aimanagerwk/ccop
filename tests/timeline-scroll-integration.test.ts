@@ -7,6 +7,7 @@ import { flattenTimeline, groupTurns } from "../web/src/lib/timeline-turn.js";
 import {
   DEFAULT_ROW_HEIGHT,
   endScrollTop,
+  measuredEndTop,
   nearLatest,
   nextScrollTop,
   virtualWindow,
@@ -21,7 +22,7 @@ function pinEffects(src: string): Array<{ body: string; deps: string }> {
   return [...src.matchAll(/use(?:Layout)?Effect\(\(\) => \{([\s\S]*?)\}, \[([^\]]*)\]\)/g)].flatMap((m) => {
     const body = m[1] ?? "";
     const deps = m[2] ?? "";
-    if (!/endScrollTop|nextScrollTop|el\.scrollTop/.test(body)) return [];
+    if (!/endScrollTop|measuredEndTop|nextScrollTop|el\.scrollTop/.test(body)) return [];
     return [{ body, deps }];
   });
 }
@@ -154,6 +155,9 @@ describe("timeline scroll wiring", () => {
     const tx = readWeb("components/Transcript.tsx");
     expect(tx).not.toMatch(/viewportHeight\s*>\s*0\s*\?\s*scroll\.viewportHeight\s*:\s*800/);
     expect(tx).toMatch(/clientHeight/);
+    expect(tx).toMatch(/scrollHeight/);
+    expect(tx).toMatch(/measuredEndTop/);
+    expect(tx).not.toMatch(/endScrollTop\s*\(/);
     expect(tx).toMatch(/if\s*\(\s*measured\s*<=\s*0\s*\)\s*return/);
     expect(tx).toMatch(/viewportHeight:\s*measured/);
     expect(tx).toMatch(/pendingPin/);
@@ -244,6 +248,9 @@ describe("timeline scroll wiring", () => {
     expect(tx).not.toMatch(/if\s*\(\s*!heightChanged\s*\)\s*pendingPin\.current\s*=\s*null/);
     expect(tx).toMatch(/el\.scrollTop\s*>\s*0/);
     expect(tx).toMatch(/top === scrollTop/);
+    expect(tx).toMatch(/measuredEndTop/);
+    expect(tx).toMatch(/scrollHeight/);
+    expect(tx).not.toMatch(/endScrollTop\s*\(/);
     expect(tx).not.toMatch(/:\s*800\b/);
   });
 
@@ -325,5 +332,37 @@ describe("timeline scroll wiring", () => {
     const endSwitch = endScrollTop({ count: other.length, viewportHeight, rowHeight: h });
     scrollTop = nextScrollTop({ reason: "session", scrollTop, endTop: endSwitch });
     expect(scrollTop).toBe(endSwitch);
+  });
+
+  it("taller-than-72 rows pin to the measured bottom, not the 72 estimate", () => {
+    const real = measuredEndTop({ scrollHeight: 8000, clientHeight: 240 });
+    const fake = endScrollTop({ count: 80, viewportHeight: 240, rowHeight: DEFAULT_ROW_HEIGHT });
+    expect(real).toBe(7760);
+    expect(real).toBeGreaterThan(fake);
+    expect(nextScrollTop({ reason: "session", scrollTop: 0, endTop: real })).toBe(real);
+    expect(nextScrollTop({ reason: "clear-q", scrollTop: fake, endTop: real })).toBe(real);
+    expect(nextScrollTop({ reason: "layout", scrollTop: fake, endTop: real })).toBe(real);
+    expect(
+      nextScrollTop({
+        reason: "query",
+        scrollTop: 0,
+        endTop: real,
+        prevEndTop: real,
+      }),
+    ).toBe(0);
+    expect(
+      nextScrollTop({
+        reason: "count",
+        scrollTop: 0,
+        endTop: real,
+        prevEndTop: real,
+      }),
+    ).toBe(0);
+    const tx = readWeb("components/Transcript.tsx");
+    expect(tx).toMatch(/measuredEndTop/);
+    expect(tx).toMatch(/scrollHeight/);
+    expect(tx).not.toMatch(/endScrollTop\s*\(/);
+    expect(tx).toMatch(/qChanged \|\| countChanged/);
+    expect(tx).toMatch(/setQ\(""\)/);
   });
 });

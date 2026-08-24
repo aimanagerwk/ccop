@@ -104,6 +104,17 @@ export function endScrollTop(p: {
   return Math.max(0, contentHeight - s.viewportHeight);
 }
 
+/** True bottom from measured DOM sizes. Does not use a row-height estimate. */
+export function measuredEndTop(p: { scrollHeight: number; clientHeight: number }): number {
+  const obj = p && typeof p === "object" && !Array.isArray(p) ? p : {};
+  const rawS = ownNumber(obj, "scrollHeight");
+  const rawV = ownNumber(obj, "clientHeight");
+  const scrollHeight = rawS !== undefined && Number.isFinite(rawS) && rawS >= 0 ? rawS : 0;
+  const clientHeight = rawV !== undefined && Number.isFinite(rawV) && rawV > 0 ? rawV : 0;
+  if (clientHeight <= 0) return 0;
+  return Math.max(0, scrollHeight - clientHeight);
+}
+
 export type ScrollPinReason = "session" | "clear-q" | "layout" | "count" | "query";
 
 function ownString(obj: object, key: string): string | undefined {

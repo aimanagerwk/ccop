@@ -621,7 +621,9 @@ describe("holes / security", () => {
 
   it("Transcript pins open switch and clear-q, not count or mid-query away from latest", () => {
     const src = readFileSync(new URL("../web/src/components/Transcript.tsx", import.meta.url), "utf8");
-    expect(src).toMatch(/endScrollTop/);
+    expect(src).toMatch(/measuredEndTop/);
+    expect(src).toMatch(/scrollHeight/);
+    expect(src).not.toMatch(/endScrollTop\s*\(/);
     expect(src).toMatch(/el\.scrollTop/);
     expect(src).toMatch(/listRef/);
     expect(src).toMatch(/setScroll/);
@@ -644,6 +646,7 @@ describe("holes / security", () => {
     expect(src).toMatch(/reason:\s*["']session["']/);
     expect(src).toMatch(/reason:\s*["']clear-q["']/);
     expect(src).toMatch(/el\.scrollTop\s*>\s*0/);
+    expect(src).toMatch(/qChanged \|\| countChanged/);
     expect(src).not.toMatch(/:\s*800\b/);
     expect(src).not.toMatch(/if\s*\(\s*!heightChanged\s*\)\s*pendingPin\.current\s*=\s*null/);
     expect(src).toMatch(/top === scrollTop/);

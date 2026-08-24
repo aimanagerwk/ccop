@@ -4,6 +4,7 @@ import * as virt from "../web/src/lib/timeline-virtual.js";
 import {
   DEFAULT_ROW_HEIGHT,
   endScrollTop,
+  measuredEndTop,
   nearLatest,
   nextScrollTop,
 } from "../web/src/lib/timeline-virtual.js";
@@ -22,6 +23,10 @@ describe("timeline scroll security", () => {
     expect(tx).not.toMatch(/viewportHeight\s*>\s*0\s*\?\s*scroll\.viewportHeight\s*:\s*800/);
     expect(tx).not.toMatch(/:\s*800\b/);
     expect(tx).toMatch(/clientHeight/);
+    expect(tx).toMatch(/scrollHeight/);
+    expect(tx).toMatch(/measuredEndTop/);
+    expect(tx).not.toMatch(/endScrollTop\s*\(/);
+    expect(tx).not.toMatch(/endScrollTop\(\s*\{[\s\S]*?rowHeight:\s*DEFAULT_ROW_HEIGHT/);
     expect(tx).toMatch(/if\s*\(\s*measured\s*<=\s*0\s*\)\s*return/);
     expect(tx).toMatch(/viewportHeight:\s*measured/);
     expect(tx).toMatch(/pendingPin/);
@@ -29,6 +34,7 @@ describe("timeline scroll security", () => {
     expect(tx).toMatch(/reason:\s*["']session["']/);
     expect(tx).toMatch(/reason:\s*["']clear-q["']/);
     expect(tx).toMatch(/el\.scrollTop\s*>\s*0/);
+    expect(tx).toMatch(/qChanged \|\| countChanged/);
     expect(tx).toMatch(/pendingPin\.current = "session"/);
     expect(tx).toMatch(/pendingPin\.current = "clear-q"/);
     expect(tx).toMatch(/pendingPin\.current = "layout"/);
@@ -110,6 +116,26 @@ describe("timeline scroll security", () => {
         endTop,
       }),
     ).toBe(mid);
+  });
+
+  it("measuredEndTop never throws and hostile sizes become 0", () => {
+    expect(typeof measuredEndTop).toBe("function");
+    const hostiles: unknown[] = [
+      { scrollHeight: Number.NaN, clientHeight: 240 },
+      { scrollHeight: 8000, clientHeight: 0 },
+      { scrollHeight: Number.POSITIVE_INFINITY, clientHeight: Number.NaN },
+      { scrollHeight: -1, clientHeight: 240 },
+      null,
+      undefined,
+      {},
+    ];
+    for (const p of hostiles) {
+      expect(() => measuredEndTop(p as Parameters<typeof measuredEndTop>[0])).not.toThrow();
+      const v = measuredEndTop(p as Parameters<typeof measuredEndTop>[0]);
+      expect(Number.isFinite(v)).toBe(true);
+      expect(v).toBeGreaterThanOrEqual(0);
+    }
+    expect(measuredEndTop({ scrollHeight: 8000, clientHeight: 0 })).toBe(0);
   });
 
   it("unknown or hostile reason leaves a mid-list scroll unchanged", () => {
