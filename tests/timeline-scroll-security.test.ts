@@ -34,7 +34,10 @@ describe("timeline scroll security", () => {
     expect(tx).toMatch(/reason:\s*["']session["']/);
     expect(tx).toMatch(/reason:\s*["']clear-q["']/);
     expect(tx).toMatch(/el\.scrollTop\s*>\s*0/);
-    expect(tx).toMatch(/qChanged \|\| countChanged/);
+    expect(tx).toMatch(
+      /pendingPin\.current &&\s*!nearLatest\(scrollTop,\s*lastEndTop\)\s*&&\s*!nearLatest\(scrollTop,\s*endTop\)/,
+    );
+    expect(tx).not.toMatch(/qChanged \|\| countChanged/);
     expect(tx).toMatch(/pendingPin\.current = "session"/);
     expect(tx).toMatch(/pendingPin\.current = "clear-q"/);
     expect(tx).toMatch(/pendingPin\.current = "layout"/);
@@ -59,6 +62,8 @@ describe("timeline scroll security", () => {
       [Number.NEGATIVE_INFINITY, 400],
       [0, Number.POSITIVE_INFINITY],
       [-1, 400],
+      [0, 0],
+      [0, -1],
     ];
     for (const [scrollTop, endTop] of hostiles) {
       expect(() => nearLatest(scrollTop, endTop)).not.toThrow();

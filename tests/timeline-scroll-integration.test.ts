@@ -362,7 +362,33 @@ describe("timeline scroll wiring", () => {
     expect(tx).toMatch(/measuredEndTop/);
     expect(tx).toMatch(/scrollHeight/);
     expect(tx).not.toMatch(/endScrollTop\s*\(/);
-    expect(tx).toMatch(/qChanged \|\| countChanged/);
+    expect(tx).toMatch(
+      /pendingPin\.current &&\s*!nearLatest\(scrollTop,\s*lastEndTop\)\s*&&\s*!nearLatest\(scrollTop,\s*endTop\)/,
+    );
+    expect(tx).not.toMatch(/qChanged \|\| countChanged/);
     expect(tx).toMatch(/setQ\(""\)/);
+  });
+
+  it("empty search at the top then q=思考 stays; leftover pending does not yank", () => {
+    const emptyEnd = measuredEndTop({ scrollHeight: 80, clientHeight: 240 });
+    const thinkEnd = measuredEndTop({ scrollHeight: 8000, clientHeight: 240 });
+    expect(emptyEnd).toBe(0);
+    expect(nearLatest(0, emptyEnd)).toBe(false);
+    expect(nearLatest(0, 0)).toBe(false);
+    let pending: "session" | "clear-q" | "layout" | null = "session";
+    if (pending && !nearLatest(0, emptyEnd) && !nearLatest(0, thinkEnd)) pending = null;
+    expect(pending).toBeNull();
+    expect(
+      nextScrollTop({
+        reason: pending ?? "query",
+        scrollTop: 0,
+        endTop: thinkEnd,
+        prevEndTop: emptyEnd,
+      }),
+    ).toBe(0);
+    expect(nextScrollTop({ reason: "clear-q", scrollTop: 0, endTop: thinkEnd })).toBe(thinkEnd);
+    const tx = readWeb("components/Transcript.tsx");
+    expect(tx).toMatch(/setQ\(""\)/);
+    expect(tx).toMatch(/measuredEndTop/);
   });
 });

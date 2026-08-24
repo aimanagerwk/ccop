@@ -127,10 +127,10 @@ function finiteOrZeroFloor(n: number | undefined): number {
   return n !== undefined && Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
-/** True when scrollTop is on the last page / 贴底. Hostile numbers are not near. */
+/** True when scrollTop is on the last page / 贴底. Empty, unmeasured, and the top are not near. */
 export function nearLatest(scrollTop: number, endTop: number): boolean {
   if (!Number.isFinite(scrollTop) || !Number.isFinite(endTop)) return false;
-  if (scrollTop < 0 || endTop < 0) return false;
+  if (scrollTop < 0 || endTop <= 0) return false;
   return scrollTop >= endTop;
 }
 

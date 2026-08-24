@@ -275,7 +275,6 @@ export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: strin
     else if (!didLayout.current && pendingPin.current == null) pendingPin.current = "layout";
     else if (
       pendingPin.current &&
-      (qChanged || countChanged) &&
       !nearLatest(scrollTop, lastEndTop) &&
       !nearLatest(scrollTop, endTop)
     ) {

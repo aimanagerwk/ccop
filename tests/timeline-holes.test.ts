@@ -646,7 +646,10 @@ describe("holes / security", () => {
     expect(src).toMatch(/reason:\s*["']session["']/);
     expect(src).toMatch(/reason:\s*["']clear-q["']/);
     expect(src).toMatch(/el\.scrollTop\s*>\s*0/);
-    expect(src).toMatch(/qChanged \|\| countChanged/);
+    expect(src).toMatch(
+      /pendingPin\.current &&\s*!nearLatest\(scrollTop,\s*lastEndTop\)\s*&&\s*!nearLatest\(scrollTop,\s*endTop\)/,
+    );
+    expect(src).not.toMatch(/qChanged \|\| countChanged/);
     expect(src).not.toMatch(/:\s*800\b/);
     expect(src).not.toMatch(/if\s*\(\s*!heightChanged\s*\)\s*pendingPin\.current\s*=\s*null/);
     expect(src).toMatch(/top === scrollTop/);

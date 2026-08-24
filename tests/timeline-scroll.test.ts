@@ -52,13 +52,56 @@ describe("timeline scroll policy", () => {
   it("leftover session pending at the top does not apply to a later search", () => {
     const endTop = measuredEndTop({ scrollHeight: 8000, clientHeight: 240 });
     let pending: "session" | "clear-q" | "layout" | null = "session";
-    const qChanged = true;
     const leftLatest = !nearLatest(0, endTop);
-    if (pending && qChanged && leftLatest) pending = null;
+    if (pending && leftLatest) pending = null;
     const reason = pending ?? "query";
     expect(reason).toBe("query");
     expect(nextScrollTop({ reason: "session", scrollTop: 0, endTop })).toBe(endTop);
     expect(nextScrollTop({ reason, scrollTop: 0, endTop, prevEndTop: endTop })).toBe(0);
+  });
+
+  it("empty list, height 0, and the top are not 贴在最新附近", () => {
+    expect(nearLatest(0, 0)).toBe(false);
+    expect(nearLatest(0, measuredEndTop({ scrollHeight: 0, clientHeight: 240 }))).toBe(false);
+    expect(nearLatest(0, measuredEndTop({ scrollHeight: 8000, clientHeight: 0 }))).toBe(false);
+    expect(nearLatest(0, measuredEndTop({ scrollHeight: 0, clientHeight: 0 }))).toBe(false);
+    expect(nearLatest(0, measuredEndTop({ scrollHeight: 200, clientHeight: 240 }))).toBe(false);
+    expect(nearLatest(5360, 5360)).toBe(true);
+    expect(nearLatest(0, 5360)).toBe(false);
+  });
+
+  it("empty search at the top then changing q to 思考 does not drag", () => {
+    const emptyEnd = measuredEndTop({ scrollHeight: 80, clientHeight: 240 });
+    expect(emptyEnd).toBe(0);
+    expect(nearLatest(0, emptyEnd)).toBe(false);
+    const thinkEnd = measuredEndTop({ scrollHeight: 8000, clientHeight: 240 });
+    expect(
+      nextScrollTop({
+        reason: "query",
+        scrollTop: 0,
+        endTop: thinkEnd,
+        prevEndTop: emptyEnd,
+      }),
+    ).toBe(0);
+    expect(
+      nextScrollTop({
+        reason: "count",
+        scrollTop: 0,
+        endTop: thinkEnd,
+        prevEndTop: emptyEnd,
+      }),
+    ).toBe(0);
+    let pending: "session" | "clear-q" | "layout" | null = "session";
+    if (pending && !nearLatest(0, emptyEnd) && !nearLatest(0, thinkEnd)) pending = null;
+    expect(pending).toBeNull();
+    expect(
+      nextScrollTop({
+        reason: pending ?? "query",
+        scrollTop: 0,
+        endTop: thinkEnd,
+        prevEndTop: emptyEnd,
+      }),
+    ).toBe(0);
   });
 
   it("nearLatest is true only when 贴底 / already on the last page", () => {
