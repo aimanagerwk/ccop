@@ -249,7 +249,8 @@ export function Transcript(props: { events: ClassifiedEvent[]; sessionId?: strin
     }
     if (sessionPinNow.current && q !== "") return;
     const el = listRef.current;
-    const measured = el && el.clientHeight > 0 ? el.clientHeight : 0;
+    if (!el) return;
+    const measured = el.clientHeight > 0 ? el.clientHeight : 0;
     if (measured <= 0) return;
     const contentHeight = el.scrollHeight;
     if (items.length > 0 && contentHeight <= 0) return;
