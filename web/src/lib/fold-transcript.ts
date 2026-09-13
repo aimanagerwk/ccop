@@ -241,9 +241,9 @@ function toolRow(name: string, e: FoldEvent): Extract<FoldedRow, { type: "tool" 
   );
 }
 
-const TOOL_OUTPUT_CLIP = 64_000;
+export const TOOL_OUTPUT_CLIP = 64_000;
 
-function clipToolText(text: string, max = TOOL_OUTPUT_CLIP): string {
+export function clipToolText(text: string, max = TOOL_OUTPUT_CLIP): string {
   if (text.length <= max) return text;
   return `${text.slice(0, Math.max(1, max - 1))}…`;
 }
@@ -308,7 +308,7 @@ export function toolCardPresentation(
   const hasOutput = output !== undefined && output !== null;
   return {
     open: hasInput || hasOutput,
-    inputText: JSON.stringify(input, null, 2),
+    inputText: formatClippedToolOutput(input),
     outputText: hasOutput ? formatClippedToolOutput(output) : "",
   };
 }

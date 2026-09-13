@@ -1,24 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { SessionRow } from "../lib/protocol";
 import type { DepotServer, DepotState } from "../lib/depot-store";
 import { lastPathSeg, serverKey, sessLabel } from "../lib/depot-store";
 import { sessionDotClass } from "../lib/session-dot";
+import {
+  formatActiveAgo,
+  isSessionHot,
+  partitionTreeNodes,
+  sessionActiveTs,
+  type CwdPartition,
+} from "../lib/session-active";
 
 export type TreeSel = {
   serverId: string | null;
   cwd: string | null;
   sessionId: string | null;
 };
-
-function groupByCwd(sessions: SessionRow[], pinned: string[]): string[] {
-  const set = new Set<string>(pinned);
-  for (const s of sessions) {
-    if (s.cwd) set.add(s.cwd);
-  }
-  return [...set].sort();
-}
 
 export function PathTree(props: {
   depot: DepotState;
@@ -27,6 +26,7 @@ export function PathTree(props: {
   selected: TreeSel;
   badges: Record<string, number>;
   collapsed: boolean;
+  inboxCount?: number;
   onToggleCollapsed: () => void;
   onSelectServer: (id: string) => void;
   onSelectCwd: (serverId: string, cwd: string) => void;
@@ -41,15 +41,51 @@ export function PathTree(props: {
   const [editId, setEditId] = useState<string | null>(null);
   const [openSrv, setOpenSrv] = useState<Record<string, boolean>>({});
   const [openCwd, setOpenCwd] = useState<Record<string, boolean>>({});
+  const [openIdle, setOpenIdle] = useState<Record<string, boolean>>({});
   const [startFor, setStartFor] = useState<string | null>(null);
   const [pinFor, setPinFor] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState<number | null>(null);
+  const nowSec = (nowMs ?? 0) / 1000;
+  const inboxN = props.inboxCount ?? 0;
+
+  useEffect(() => {
+    setNowMs(Date.now());
+    const t = setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    const sid = props.selected.sessionId;
+    const serverId = props.selected.serverId;
+    if (!sid || !serverId) return;
+    const sessions = props.sessionsByServer[serverId] || [];
+    const hit = sessions.find((s) => s.id === sid);
+    if (!hit) return;
+    if (isSessionHot(hit, Date.now() / 1000)) return;
+    const ck = `${serverId}|${hit.cwd || ""}`;
+    setOpenSrv((m) => (m[serverId] === false ? { ...m, [serverId]: true } : m));
+    setOpenCwd((m) => (m[ck] === false ? { ...m, [ck]: true } : m));
+    setOpenIdle((m) => (m[ck] ? m : { ...m, [ck]: true }));
+    const pinned = new Set(props.depot.pinnedCwds[serverId] || []);
+    const { idleCwds } = partitionTreeNodes(sessions, [...pinned], Date.now() / 1000, sid);
+    if (idleCwds.some((p) => p.cwd === (hit.cwd || ""))) {
+      const sk = `${serverId}|idle-cwds`;
+      setOpenIdle((m) => (m[sk] ? m : { ...m, [sk]: true }));
+    }
+  }, [props.selected.sessionId, props.selected.serverId, props.sessionsByServer, props.depot.pinnedCwds]);
 
   if (props.collapsed) {
     return (
       <aside className="rail">
         <div className="collapsed-rail">
-          <button className="ghost rail-icon" aria-label="展开侧栏" onClick={props.onToggleCollapsed}>
+          <button
+            className="ghost rail-icon"
+            aria-label={inboxN ? `展开侧栏，待批准 ${inboxN}` : "展开侧栏"}
+            title={inboxN ? `待批准 ${inboxN}` : "展开侧栏"}
+            onClick={props.onToggleCollapsed}
+          >
             »
+            {inboxN ? <span className="badge" /> : null}
           </button>
           {props.depot.servers.map((s) => (
             <button
@@ -91,7 +127,20 @@ export function PathTree(props: {
         {props.depot.servers.map((srv) => {
           const open = openSrv[srv.id] !== false;
           const sessions = props.sessionsByServer[srv.id] || [];
-          const cwds = groupByCwd(sessions, props.depot.pinnedCwds[srv.id] || []);
+          let { visible, idleCwds } = partitionTreeNodes(
+            sessions,
+            props.depot.pinnedCwds[srv.id] || [],
+            nowSec,
+            props.selected.serverId === srv.id ? props.selected.sessionId : null,
+          );
+          if (nowMs === null) {
+            visible = [...visible, ...idleCwds].map((p) => ({
+              ...p,
+              hot: [...p.hot, ...p.idle],
+              idle: [],
+            }));
+            idleCwds = [];
+          }
           const live = Boolean(props.live[srv.id]);
           const srvOn = props.selected.serverId === srv.id && !props.selected.sessionId && !props.selected.cwd;
           return (
@@ -175,97 +224,82 @@ export function PathTree(props: {
                       onCancel={() => setStartFor(null)}
                     />
                   ) : null}
-                  {cwds.map((cwd) => {
-                    const ck = `${srv.id}|${cwd}`;
-                    const cOpen = openCwd[ck] !== false;
-                    const here = sessions.filter((s) => (s.cwd || "") === cwd);
-                    const cwdOn =
-                      props.selected.cwd === cwd &&
-                      props.selected.serverId === srv.id &&
-                      !props.selected.sessionId;
-                    return (
-                      <div key={ck}>
-                        <div className={`trow indent-1 ${cwdOn ? "on" : ""}`}>
-                          <button
-                            type="button"
-                            className="trow-main"
-                            title={cwd}
-                            onClick={() => {
-                              setOpenCwd((m) => ({ ...m, [ck]: !cOpen }));
-                              props.onSelectCwd(srv.id, cwd);
-                            }}
-                          >
-                            <span className="chev">{cOpen ? "▾" : "▸"}</span>
-                            <span className="trow-name path">{lastPathSeg(cwd)}</span>
-                            <span className="trow-meta" title={cwd}>
-                              {cwd}
-                            </span>
-                          </button>
-                          <div className="trow-acts">
-                            <button
-                              type="button"
-                              className="plus-act"
-                              title="新建会话"
-                              aria-label="新建会话"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setStartFor(startFor === ck ? null : ck);
-                              }}
-                            >
-                              +
-                            </button>
-                          </div>
-                        </div>
-                        {cOpen ? (
-                          <>
-                            {here.map((s) => {
-                              const on = props.selected.sessionId === s.id;
-                              return (
-                                <div key={s.id} className={`trow indent-2 ${on ? "on" : ""}`}>
-                                  <button
-                                    type="button"
-                                    className="trow-main"
-                                    onClick={() => props.onSelectSession(srv.id, s.cwd, s.id)}
-                                  >
-                                    <span className="chev" />
-                                    <span className={`dot ${sessionDotClass(s)}`} />
-                                    <span className="trow-name">{sessLabel(s)}</span>
-                                    {props.badges[s.id] && props.selected.sessionId !== s.id ? (
-                                      <span className="badge" />
-                                    ) : null}
-                                  </button>
-                                  <div className="trow-acts">
-                                    <button
-                                      type="button"
-                                      className="danger icon-act"
-                                      title="停止会话"
-                                      aria-label="停止会话"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        void props.onStop(srv.id, s.id);
-                                      }}
-                                    >
-                                      ■
-                                    </button>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                            {startFor === ck ? (
-                              <StartFields
-                                cwd={cwd}
-                                onStart={async (prompt, name, startCwd) => {
-                                  await props.onStart(srv.id, startCwd, prompt, name);
-                                  setStartFor(null);
-                                }}
-                                onCancel={() => setStartFor(null)}
-                              />
-                            ) : null}
-                          </>
-                        ) : null}
-                      </div>
-                    );
-                  })}
+                  {visible.map((part) => (
+                    <CwdBlock
+                      key={`${srv.id}|${part.cwd}`}
+                      srvId={srv.id}
+                      part={part}
+                      selected={props.selected}
+                      badges={props.badges}
+                      nowMs={nowMs}
+                      open={openCwd[`${srv.id}|${part.cwd}`] !== false}
+                      idleOpen={openIdle[`${srv.id}|${part.cwd}`] === true}
+                      startFor={startFor}
+                      onToggleOpen={() => {
+                        const ck = `${srv.id}|${part.cwd}`;
+                        setOpenCwd((m) => ({ ...m, [ck]: !(m[ck] !== false) }));
+                        props.onSelectCwd(srv.id, part.cwd);
+                      }}
+                      onToggleIdle={() => {
+                        const ck = `${srv.id}|${part.cwd}`;
+                        setOpenIdle((m) => ({ ...m, [ck]: !m[ck] }));
+                      }}
+                      onSelectSession={props.onSelectSession}
+                      onStop={props.onStop}
+                      onToggleStart={() => {
+                        const ck = `${srv.id}|${part.cwd}`;
+                        setStartFor(startFor === ck ? null : ck);
+                      }}
+                      onStarted={async (prompt, name, startCwd) => {
+                        await props.onStart(srv.id, startCwd, prompt, name);
+                        setStartFor(null);
+                      }}
+                      onCancelStart={() => setStartFor(null)}
+                    />
+                  ))}
+                  {idleCwds.length > 0 ? (
+                    <IdleFold
+                      indent={1}
+                      n={idleCwds.reduce((a, p) => a + p.idle.length, 0)}
+                      open={openIdle[`${srv.id}|idle-cwds`] === true}
+                      extra={`${idleCwds.length} 个目录`}
+                      onToggle={() =>
+                        setOpenIdle((m) => ({ ...m, [`${srv.id}|idle-cwds`]: !m[`${srv.id}|idle-cwds`] }))
+                      }
+                    >
+                      {idleCwds.map((part) => (
+                        <CwdBlock
+                          key={`${srv.id}|idle|${part.cwd}`}
+                          srvId={srv.id}
+                          part={{ ...part, hot: [], idle: part.idle }}
+                          selected={props.selected}
+                          badges={props.badges}
+                          nowMs={nowMs}
+                          open={openCwd[`${srv.id}|${part.cwd}`] !== false}
+                          idleOpen
+                          hideIdleFold
+                          startFor={startFor}
+                          onToggleOpen={() => {
+                            const ck = `${srv.id}|${part.cwd}`;
+                            setOpenCwd((m) => ({ ...m, [ck]: !(m[ck] !== false) }));
+                            props.onSelectCwd(srv.id, part.cwd);
+                          }}
+                          onToggleIdle={() => undefined}
+                          onSelectSession={props.onSelectSession}
+                          onStop={props.onStop}
+                          onToggleStart={() => {
+                            const ck = `${srv.id}|${part.cwd}`;
+                            setStartFor(startFor === ck ? null : ck);
+                          }}
+                          onStarted={async (prompt, name, startCwd) => {
+                            await props.onStart(srv.id, startCwd, prompt, name);
+                            setStartFor(null);
+                          }}
+                          onCancelStart={() => setStartFor(null)}
+                        />
+                      ))}
+                    </IdleFold>
+                  ) : null}
                   <div className={`trow indent-1`}>
                     <button
                       type="button"
@@ -298,6 +332,164 @@ export function PathTree(props: {
         </div>
       ) : null}
     </aside>
+  );
+}
+
+function CwdBlock(props: {
+  srvId: string;
+  part: CwdPartition;
+  selected: TreeSel;
+  badges: Record<string, number>;
+  nowMs: number | null;
+  open: boolean;
+  idleOpen: boolean;
+  hideIdleFold?: boolean;
+  startFor: string | null;
+  onToggleOpen: () => void;
+  onToggleIdle: () => void;
+  onSelectSession: (serverId: string, cwd: string | undefined, id: string) => void;
+  onStop: (serverId: string, id: string) => Promise<void>;
+  onToggleStart: () => void;
+  onStarted: (prompt: string, name: string, cwd: string) => Promise<void>;
+  onCancelStart: () => void;
+}) {
+  const { part } = props;
+  const ck = `${props.srvId}|${part.cwd}`;
+  const cwdOn =
+    props.selected.cwd === part.cwd && props.selected.serverId === props.srvId && !props.selected.sessionId;
+  const listed = props.hideIdleFold ? part.idle : part.hot;
+  return (
+    <div>
+      <div className={`trow indent-1 ${cwdOn ? "on" : ""}`}>
+        <button type="button" className="trow-main" title={part.cwd} onClick={props.onToggleOpen}>
+          <span className="chev">{props.open ? "▾" : "▸"}</span>
+          <span className="trow-name path">{lastPathSeg(part.cwd)}</span>
+          <span className="trow-meta" title={part.cwd}>
+            {part.cwd}
+          </span>
+        </button>
+        <div className="trow-acts">
+          <button
+            type="button"
+            className="plus-act"
+            title="新建会话"
+            aria-label="新建会话"
+            onClick={(e) => {
+              e.stopPropagation();
+              props.onToggleStart();
+            }}
+          >
+            +
+          </button>
+        </div>
+      </div>
+      {props.open ? (
+        <>
+          {listed.map((s) => (
+            <SessionTrow
+              key={s.id}
+              s={s}
+              serverId={props.srvId}
+              selected={props.selected.sessionId === s.id}
+              badge={Boolean(props.badges[s.id] && props.selected.sessionId !== s.id)}
+              nowMs={props.nowMs}
+              indent={2}
+              onSelect={() => props.onSelectSession(props.srvId, s.cwd, s.id)}
+              onStop={() => void props.onStop(props.srvId, s.id)}
+            />
+          ))}
+          {!props.hideIdleFold && part.idle.length > 0 ? (
+            <IdleFold indent={2} n={part.idle.length} open={props.idleOpen} onToggle={props.onToggleIdle}>
+              {part.idle.map((s) => (
+                <SessionTrow
+                  key={s.id}
+                  s={s}
+                  serverId={props.srvId}
+                  selected={props.selected.sessionId === s.id}
+                  badge={Boolean(props.badges[s.id] && props.selected.sessionId !== s.id)}
+                  nowMs={props.nowMs}
+                  indent={3}
+                  onSelect={() => props.onSelectSession(props.srvId, s.cwd, s.id)}
+                  onStop={() => void props.onStop(props.srvId, s.id)}
+                />
+              ))}
+            </IdleFold>
+          ) : null}
+          {props.startFor === ck ? (
+            <StartFields cwd={part.cwd} onStart={props.onStarted} onCancel={props.onCancelStart} />
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function SessionTrow(props: {
+  s: SessionRow;
+  serverId: string;
+  selected: boolean;
+  badge: boolean;
+  nowMs: number | null;
+  indent: 2 | 3;
+  onSelect: () => void;
+  onStop: () => void;
+}) {
+  const ago = props.nowMs === null ? { text: "", title: "" } : formatActiveAgo(sessionActiveTs(props.s), props.nowMs);
+  return (
+    <div className={`trow indent-${props.indent} ${props.selected ? "on" : ""}`}>
+      <button type="button" className="trow-main" onClick={props.onSelect}>
+        <span className="chev" />
+        <span className={`dot ${sessionDotClass(props.s)}`} />
+        <span className="trow-name">{sessLabel(props.s)}</span>
+        {ago.text ? (
+          <span className="trow-ago" title={ago.title}>
+            {ago.text}
+          </span>
+        ) : null}
+        {props.badge ? <span className="badge" /> : null}
+      </button>
+      <div className="trow-acts">
+        <button
+          type="button"
+          className="danger icon-act"
+          title="停止会话"
+          aria-label="停止会话"
+          onClick={(e) => {
+            e.stopPropagation();
+            props.onStop();
+          }}
+        >
+          ■
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function IdleFold(props: {
+  indent: 1 | 2;
+  n: number;
+  open: boolean;
+  extra?: string;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <>
+      <div className={`trow indent-${props.indent}`}>
+        <button type="button" className="trow-main" onClick={props.onToggle}>
+          <span className="chev">{props.open ? "▾" : "▸"}</span>
+          <span className="trow-name" style={{ color: "var(--mute)" }}>
+            暂无活动
+          </span>
+          <span className="trow-ago">
+            {props.n}
+            {props.extra ? ` · ${props.extra}` : ""}
+          </span>
+        </button>
+      </div>
+      {props.open ? props.children : null}
+    </>
   );
 }
 

@@ -15,9 +15,13 @@ import {
   type SessionRef,
 } from "./store.js";
 import {
+  appendUsageHistory,
   extractUsageFromResult,
+  normalizeSessionUsage,
+  normalizeUsageHistory,
   usageStatusFields,
   type SessionUsage,
+  type UsageHistoryPoint,
 } from "./usage.js";
 import { readWsEnv, startWsServer, type EventCb } from "./ws.js";
 import {
@@ -265,6 +269,7 @@ export class Session {
   /** Hardcoded: dynamic workflows always on. */
   enableWorkflows = true;
   usage: SessionUsage | null = null;
+  usageHistory: UsageHistoryPoint[] = [];
   skills: string[] = [];
   slash_commands: string[] = [];
   plugins: unknown[] = [];
@@ -320,6 +325,7 @@ export class Session {
       effort: this.effort,
       enable_workflows: this.enableWorkflows,
       usage: this.usage,
+      usage_history: this.usageHistory,
       skills: this.skills,
       slash_commands: this.slash_commands,
       plugins: this.plugins,
@@ -457,7 +463,10 @@ export class Session {
         const subtype = m?.subtype;
         if (type === "result" || typeName === "ResultMessage") {
           const extracted = extractUsageFromResult(m);
-          if (extracted) this.usage = extracted;
+          if (extracted) {
+            this.usage = extracted;
+            this.usageHistory = appendUsageHistory(this.usageHistory, extracted);
+          }
           this.persist();
           this.emit(
             classify.fromResult({
@@ -759,6 +768,12 @@ export class Host {
     if (this.sessions[id]) await this.teardown(id);
     const sess = new Session(id, cwd, name, this);
     sess.permissionMode = permissionMode;
+    if (resumeId) {
+      const disk = listSessions().find((s) => String(s.id) === id);
+      const restored = normalizeSessionUsage(disk?.usage);
+      if (restored) sess.usage = restored;
+      sess.usageHistory = normalizeUsageHistory(disk?.usage_history);
+    }
     this.sessions[id] = sess;
 
     const hookCb = async (hookInput: unknown, toolUseId: string | null) => sess.onHook(hookInput, toolUseId);
@@ -942,10 +957,11 @@ export class Host {
       if (!("skills" in rec)) rec.skills = live?.skills ?? [];
       if (!("slash_commands" in rec)) rec.slash_commands = live?.slash_commands ?? [];
       if (!("plugins" in rec)) rec.plugins = live?.plugins ?? [];
-      const usage = (live?.usage ?? rec.usage) as SessionUsage | null | undefined;
+      const usage = live?.usage ?? normalizeSessionUsage(rec.usage);
       Object.assign(rec, usageStatusFields(usage ?? null));
       if (usage) rec.usage = usage;
-      else if (!("usage" in rec)) rec.usage = null;
+      else rec.usage = null;
+      delete rec.usage_history;
       rows.push(rec);
     }
     const out: Record<string, unknown> = { ok: true, sessions: rows };
@@ -969,6 +985,7 @@ export class Host {
       rec.slash_commands = live.slash_commands;
       rec.plugins = live.plugins;
       rec.usage = live.usage;
+      rec.usage_history = live.usageHistory;
       rec.effort = live.effort;
       rec.enable_workflows = live.enableWorkflows;
       rec.permission_mode = live.permissionMode;
@@ -982,10 +999,10 @@ export class Host {
   async cmdInfo(req: Record<string, unknown>): Promise<Record<string, unknown>> {
     const resolved = resolveSessionId(lookupKey(req), this.sessionRefs());
     if (!resolved.ok) return resolved;
-    const { rec } = this.diskOrLive(resolved.id);
-    const usage = (rec.usage as SessionUsage | null) ?? null;
+    const { rec, live } = this.diskOrLive(resolved.id);
+    const usage = live?.usage ?? normalizeSessionUsage(rec.usage);
+    const usage_history = normalizeUsageHistory(rec.usage_history);
     let mcp_servers: unknown = undefined;
-    const live = this.sessions[resolved.id];
     if (live?.client && live.alive) {
       try {
         mcp_servers = await live.client.mcpServerStatus();
@@ -1004,6 +1021,7 @@ export class Host {
       plugins: rec.plugins ?? [],
       ...(mcp_servers !== undefined ? { mcp_servers } : {}),
       usage,
+      usage_history,
       ...usageStatusFields(usage),
     };
   }
